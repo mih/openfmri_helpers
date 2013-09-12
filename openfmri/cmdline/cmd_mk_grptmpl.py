@@ -33,7 +33,7 @@ def setup_parser(parser):
     hlp.parser_add_common_args(parser, required=True, default='bold',
         opt=('label',))
     parser.add_argument(
-        '--zpad', type=int, default=0,
+        '--zpad', type=int,
         help="""Number of slices to add above and below the z-slice stack
         in the initial template image. This can aid alignment of images
         with small FOV in z-direction. Default: 0""")
@@ -54,6 +54,17 @@ def setup_parser(parser):
         only works properly for radiological images! (hence OFF by default)""")
     parser.add_argument('--grabber-expression',
         help="""For the data grabber""")
+    parser.add_argument('--final-skullstrip', type=hlp.arg2bool,
+        help="""If true, the final brain-extracted template image is created
+        by a final skull-stripping of the head template image.""")
+    parser.add_argument('--bet-padding', type=hlp.arg2bool,
+        help="""Enable padding for BET""")
+    parser.add_argument('--tmpl-bet-frac', type=float,
+        help="""Frac parameter for the template skullstripping""")
+    parser.add_argument('--tmpl-bet-gradient', type=float,
+        help="""Gradient parameter for the template skullstripping""")
+    parser.add_argument('--subj-bet-frac', type=float,
+        help="""Frac parameter for skullstripping subject images""")
 
 import sys
 import os                                    # system functions
@@ -83,7 +94,7 @@ def make_init_template(wf, datasink, lvl, brains, heads, target_resolution,
                 function=zslice_pad,
                 input_names=['in_file', 'nslices'],
                 output_names=['padded_file']))
-    zpad_head.inputs.nslices = 20
+    zpad_head.inputs.nslices = zpad
     zpad_brain = zpad_head.clone('lvl%i_zpad_brain' % lvl)
     if zpad > 0:
         wf.connect(best_reference, 'out_head', zpad_head, 'in_file')
@@ -112,7 +123,8 @@ def make_init_template(wf, datasink, lvl, brains, heads, target_resolution,
     return upsample_brain, upsample_head
 
 
-def make_subj_preproc_branch(label, wf, subj, datadir, datasrc):
+def make_subj_preproc_branch(label, wf, subj, datadir, datasrc, 
+        bet_frac=0.5, bet_padding=False):
     subj_sink = pe.Node(
             interface=nio.DataSink(
                 parameterization=False,
@@ -137,20 +149,25 @@ def make_subj_preproc_branch(label, wf, subj, datadir, datasrc):
             interface=fsl.Merge(dimension='t'))
     #wf.connect(make_samplevols, 'out_file', merge_samplevols, 'in_files')
     wf.connect(make_samplevols, 'roi_file', merge_samplevols, 'in_files')
+    # normalize all input images
+    normalize_vols = pe.Node(
+            name='sub%.3i_normalize_samplevols' % subj,
+            interface=fsl.ImageMaths(op_string='-inm 1000'))
+    wf.connect(merge_samplevols, 'merged_file', normalize_vols, 'in_file')
     # 4D alignment across runs
     align_samplevols = pe.Node(
             name='sub%.3i_align_samplevols' % subj,
             interface=fsl.MCFLIRT(
                 ref_vol=0,
                 stages=4))
-    wf.connect(merge_samplevols, 'merged_file', align_samplevols, 'in_file')
+    wf.connect(normalize_vols, 'out_file', align_samplevols, 'in_file')
     wf.connect(align_samplevols, 'out_file',
                subj_sink, 'qa.%s.aligned_head_samples.@out' % label)
     # merge all aligned volumes into a normalized subject template
     make_subj_tmpl = pe.Node(
             name='sub%.3i_make_subj_tmpl' % subj,
             interface=Function(
-                function=nonzero_normed_avg,
+                function=nonzero_avg,
                 input_names=['in_file'],
                 output_names=['out_file', 'avg_stats']))
     wf.connect(align_samplevols, 'out_file', make_subj_tmpl, 'in_file')
@@ -159,11 +176,13 @@ def make_subj_preproc_branch(label, wf, subj, datadir, datasrc):
     wf.connect(make_subj_tmpl, 'avg_stats',
                subj_sink, 'qa.%s.head_avgstats.@out' % label)
     # extract brain from subject template
+    if bet_padding:
+        bet_interface=fsl.BET(padding=True, frac=bet_frac)
+    else:
+        bet_interface=fsl.BET(robust=True, frac=bet_frac)
     subj_bet = pe.Node(
             name='sub%.3i_bet' % subj,
-            interface=fsl.BET(
-                  padding=True,
-                  frac=0.15))
+            interface=bet_interface)
     wf.connect(make_subj_tmpl, 'out_file', subj_bet, 'in_file')
     wf.connect(subj_bet, 'out_file',
                subj_sink, 'qa.%s.brain.@out' % label)
@@ -246,7 +265,7 @@ def align_subj_to_tmpl_nlin(wf, subj, lvl, brain_tmpl, head_tmpl, head, last_lin
     return align_head_to_tmpl
 
 def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
-                      linear):
+                      linear, bet_frac=0.5, bet_padding=False):
     # merge and average for new template
     merge_heads = pe.Node(
                 name='lvl%i_merge_heads' % lvl,
@@ -257,7 +276,7 @@ def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
     make_head_tmpl = pe.Node(
             name='lvl%i_make_head_tmpl' % lvl,
             interface=Function(
-                function=nonzero_normed_avg,
+                function=nonzero_avg,
                 input_names=['in_file'],
                 output_names=['out_file', 'avg_stats']))
     wf.connect(in_heads, 'out', merge_heads, 'in_files')
@@ -276,7 +295,7 @@ def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
         make_brain_tmpl = pe.Node(
                 name='lvl%i_make_brain_tmpl' % lvl,
                 interface=Function(
-                    function=nonzero_normed_avg,
+                    function=nonzero_avg,
                     input_names=['in_file'],
                     output_names=['out_file', 'avg_stats']))
         wf.connect(in_brains, 'out', merge_brains, 'in_files')
@@ -288,38 +307,38 @@ def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
         return make_brain_tmpl, make_head_tmpl
     else:
         # skull-strip the head template
+        if bet_padding:
+            bet_interface=fsl.BET(padding=True, frac=bet_frac)
+        else:
+            bet_interface=fsl.BET(robust=True, frac=bet_frac)
         tmpl_bet = pe.Node(
             name='lvl%i_tmpl_bet' % lvl,
-            interface=fsl.BET(
-                  padding=True,
-                  mask=True,
-                  frac=0.5))
+            interface=bet_interface)
         wf.connect(make_head_tmpl, 'out_file', tmpl_bet, 'in_file')
         wf.connect(tmpl_bet, 'out_file',
                    datasink, 'qa.lvl%i.brain.@out' % lvl)
         return tmpl_bet, make_head_tmpl
 
-def trim_tmpl(wf, datasink, tmpl, name, roi):
+def trim_tmpl(wf, tmpl, name, roi):
     # trim the template
     x_min, x_size, y_min, y_size, z_min, z_size = roi
     trim_template = pe.Node(
             name='trim_%s' % name,
             interface=fsl.ExtractROI(
-                #x_min=26, x_size=132,
-                #y_min=7, y_size=175,
-                #z_min=24,  z_size=48))
                 x_min=x_min, x_size=x_size,
                 y_min=y_min, y_size=y_size,
                 z_min=z_min, z_size=z_size))
     wf.connect(tmpl, 'out_file', trim_template, 'in_file')
-    ## final brain extract
-    #bet = pe.Node(
-    #        name='final_bet',
-    #        interface=fsl.BET(
-    #            padding=True,
-    #            frac=0.55))
-    #wf.connect(trim_template, 'roi_file', bet, 'in_file')
-    return trim_template
+
+def final_bet(wf, head_tmpl, slot_name, padding=False, frac=0.5,
+              gradient=0):
+    if padding:
+        interface=fsl.BET(padding=True, frac=frac, vertical_gradient=gradient)
+    else:
+        interface=fsl.BET(robust=True, frac=frac, vertical_gradient=gradient)
+    bet = pe.Node(name='final_bet', interface=interface)
+    wf.connect(head_tmpl, slot_name, bet, 'in_file')
+    return bet
 
 
 def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
@@ -338,8 +357,6 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
                 searchr_x=[-90, 90], searchr_y=[-90, 90],
                 searchr_z=[-90, 90],
                 dof=9,
-                #searchr_x=[-20, 20], searchr_y=[-20, 20],
-                #searchr_z=[-20, 20], dof=7,
                 args="-interp trilinear",
                 reference=mni_tmpl
             ))
@@ -348,8 +365,6 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
             interface=fsl.FLIRT(
                 cost='corratio',
                 no_search=True,
-                #searchr_x=[-90, 90], searchr_y=[-90, 90],
-                #searchr_z=[-90, 90],
                 dof=12,
                 args="-interp trilinear",
                 reference=mni_tmpl,
@@ -445,10 +460,16 @@ def get_epi_tmpl_workflow(wf, datasrc,
                           label,
                           target_resolution,
                           datadir=os.path.abspath(os.curdir),
-                          lin=3, nlin=2,
+                          lin=3, nlin=1,
                           zpad=0,
                           template_roi=None,
-                          set_mni_sform=False):
+                          set_mni_sform=False,
+                          do_final_bet=False,
+                          bet_padding=False,
+                          subj_bet_frac=0.5,
+                          tmpl_bet_frac=0.5,
+                          tmpl_bet_gradient=0
+                          ):
     # data sink
     datasink = pe.Node(
         interface=nio.DataSink(
@@ -481,25 +502,27 @@ def get_epi_tmpl_workflow(wf, datasrc,
         else:
             brain_tmpl, head_tmpl = make_avg_template(
                                         wf, datasink, lvl, brains, heads,
-                                        lvl <= lin)
+                                        lvl <= lin,
+                                        bet_frac=tmpl_bet_frac,
+                                        bet_padding=bet_padding)
         for i, subj in enumerate(subjects):
             if lvl == 0:
                 brain, head = make_subj_preproc_branch('template_%s' % label,
-                                    wf, subj, datadir, datasrc)
+                                    wf, subj, datadir, datasrc,
+                                    bet_frac=subj_bet_frac,
+                                    bet_padding=bet_padding)
                 subj_nodes[subj] = (brain, head)
             else:
                 # pull original nodes out of cache
                 brain, head = subj_nodes[subj]
                 # do linear alignment
                 if lvl <= lin:
-                    print 'linear'
                     brain, head = align_subj_to_tmpl_lin(
                         wf, subj, lvl,
                         latest_brain_tmpl, latest_head_tmpl,
                         brain, head, last_linear_align[subj])
                     last_linear_align[subj] = brain
                 else:
-                    print 'non-linear'
                     # non-linear alignment
                     head = align_subj_to_tmpl_nlin(
                             wf, subj, lvl,
@@ -522,11 +545,15 @@ def get_epi_tmpl_workflow(wf, datasrc,
             ('_12dof/[^\.]*\.', '_12dof.'),
             ]
     if not template_roi is None:
-        latest_brain_tmpl = trim_tmpl(wf, datasink, latest_brain_tmpl, 'brain', roi=template_roi)
-        latest_head_tmpl = trim_tmpl(wf, datasink, latest_head_tmpl, 'head', roi=template_roi)
+        latest_brain_tmpl = trim_tmpl(wf, latest_brain_tmpl, 'brain', roi=template_roi)
+        latest_head_tmpl = trim_tmpl(wf, latest_head_tmpl, 'head', roi=template_roi)
         out_slot = 'roi_file'
     else:
         out_slot = 'out_file'
+    if do_final_bet:
+        latest_brain_tmpl = final_bet(wf, latest_head_tmpl, out_slot,
+                                      bet_padding, tmpl_bet_frac,
+                                      tmpl_bet_gradient)
     wf.connect(latest_brain_tmpl, out_slot, datasink, 'brain.@out')
     wf.connect(latest_head_tmpl, out_slot, datasink, 'head.@out')
 
@@ -572,20 +599,52 @@ def run(args):
                     [('in_files_sub%.3i' % s, grabber_exp % dict(subj='sub%.3i' % s))
                             for s in subjects]))
 
-    wf = get_epi_tmpl_workflow(wf, datasrc,
-                               subjects,
-                               label,
-                               target_res,
-                               dsdir,
-                               lin=1,
-                               nlin=0,
-                               zpad=hlp.get_cfg_option('functional group template',
-                                                   'z-pad slices',
-                                                   cli_input=args.zpad),
-                               template_roi=roi,
-                               set_mni_sform=hlp.arg2bool(
-                                   hlp.get_cfg_option('functional group template',
-                                                  'set mni sform',
-                                                  cli_input=args.apply_mni_sform)))
+    wf = get_epi_tmpl_workflow(wf, datasrc, subjects, label,
+            target_res,
+            dsdir,
+            lin=4,
+            nlin=1,
+            zpad=int(hlp.get_cfg_option(cfg_section,
+                                        'z-slice padding',
+                                        cli_input=args.zpad,
+                                        default=0)),
+            template_roi=roi,
+            set_mni_sform=hlp.arg2bool(
+                            hlp.get_cfg_option(
+                                cfg_section,
+                                'apply mni sform',
+                                cli_input=args.apply_mni_sform,
+                                default=False)),
+            do_final_bet=hlp.arg2bool(
+                        hlp.get_cfg_option(
+                            cfg_section,
+                            'final skullstrip',
+                            cli_input=args.final_skullstrip,
+                            default=False)),
+            bet_padding=hlp.arg2bool(
+                        hlp.get_cfg_option(
+                            cfg_section,
+                            'bet padding',
+                            cli_input=args.bet_padding,
+                            default=False)),
+            subj_bet_frac=float(
+                        hlp.get_cfg_option(
+                            cfg_section,
+                            'subject bet frac',
+                            cli_input=args.subj_bet_frac,
+                            default=0.5)),
+            tmpl_bet_frac=float(
+                        hlp.get_cfg_option(
+                            cfg_section,
+                            'template bet frac',
+                            cli_input=args.tmpl_bet_frac,
+                            default=0.5)),
+            tmpl_bet_gradient=float(
+                        hlp.get_cfg_option(
+                            cfg_section,
+                            'template bet gradient',
+                            cli_input=args.tmpl_bet_gradient,
+                            default=0))
+            )
 
     return wf

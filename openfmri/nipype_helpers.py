@@ -20,12 +20,12 @@ def pick_closest_to_avg(in_files, in_aux):
     import numpy as np
     import nibabel as nb
     import nipype.interfaces.fsl as fsl
-    from openfmri.nipype_helpers import nonzero_normed_avg
+    from openfmri.nipype_helpers import nonzero_avg
     # send timeseries to normed avg
     fsl.Merge(dimension='t',
               in_files=in_files,
               merged_file='merged_input.nii.gz').run()
-    avg, avg_stats = nonzero_normed_avg('merged_input.nii.gz')
+    avg, avg_stats = nonzero_avg('merged_input.nii.gz')
     avg_data = nb.load(avg).get_data()
     dists = [np.sum((avg_data - nb.load(vol).get_data())**2) for vol in in_files]
     min_idx = np.argmin(dists)
@@ -49,16 +49,11 @@ def zslice_pad(in_file, nslices):
     nb.Nifti1Image(out_data, xfm).to_filename('zslice_padded.nii.gz')
     return os.path.abspath('zslice_padded.nii.gz')
 
-def nonzero_normed_avg(in_file):
+def nonzero_avg(in_file):
     import numpy as np
     import os
     import nibabel as nb
-    import nipype.interfaces.fsl as fsl
-    import nipype.interfaces.afni as afni
-    fsl.ImageMaths(in_file=in_file,
-                   op_string='-inm 1000 -thrP 10',
-                   out_file='normalized1000.nii.gz').run()
-    in_img = nb.load('normalized1000.nii.gz')
+    in_img = nb.load(in_file)
     in_data = in_img.get_data()
     avg_data = np.zeros(in_data.shape[:3], dtype=np.float)
     avg_count = np.ones(in_data.shape[:3], dtype=np.int16)
@@ -72,12 +67,12 @@ def nonzero_normed_avg(in_file):
         avg_data = in_data
     avg_data /= avg_count
     nb.save(nb.Nifti1Image(avg_data, in_img.get_affine()),
-            'avg_normed.nii.gz')
+            'avg.nii.gz')
     nb.save(nb.Nifti1Image(avg_count, in_img.get_affine()),
-            'avg_normed_overlap.nii.gz')
+            'avg_overlap.nii.gz')
     return [os.path.abspath(i) for i in (
-        'avg_normed.nii.gz',
-        'avg_normed_overlap.nii.gz',
+        'avg.nii.gz',
+        'avg_overlap.nii.gz',
         )]
 
 def make_epi_template(bold_brains):
