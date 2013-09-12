@@ -33,6 +33,13 @@ def setup_parser(parser):
     hlp.parser_add_common_args(parser, required=True, default='bold',
         opt=('label',))
     parser.add_argument(
+        '--linear', type=int,
+        help="""Number of iterations of linear alignments""")
+    parser.add_argument(
+        '--nonlin', type=int,
+        help="""Number of iterations of non-linear alignments. Experimental and
+        disabled by default""")
+    parser.add_argument(
         '--zpad', type=int,
         help="""Number of slices to add above and below the z-slice stack
         in the initial template image. This can aid alignment of images
@@ -602,8 +609,14 @@ def run(args):
     wf = get_epi_tmpl_workflow(wf, datasrc, subjects, label,
             target_res,
             dsdir,
-            lin=4,
-            nlin=1,
+            lin=int(hlp.get_cfg_option(cfg_section,
+                                       'linear iterations',
+                                       cli_input=args.linear,
+                                       default=1)),
+            nlin=int(hlp.get_cfg_option(cfg_section,
+                                        'non-linear iterations',
+                                        cli_input=args.nonlin,
+                                        default=0)),
             zpad=int(hlp.get_cfg_option(cfg_section,
                                         'z-slice padding',
                                         cli_input=args.zpad,
