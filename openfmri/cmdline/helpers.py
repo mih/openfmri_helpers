@@ -14,6 +14,7 @@ import argparse
 import re
 import sys
 import os
+from os.path import join as opj
 import logging
 lgr = logging.getLogger(__name__)
 
@@ -146,13 +147,14 @@ def get_path_cfg(section, option, cli_input, default=None,
     path_ = os.path.expanduser(os.path.expandvars(path_))
     lgr.debug("path for '%s[%s]' set to '%s'" % (section, option, path_))
     if ensure_exists and not os.path.exists(path_):
-        if create_path:
-            lgr.debug("create directory '%s' for '%s[%s]'" % (section, option))
+        if create_dir:
+            lgr.debug("create directory '%s' for '%s[%s]'"
+                      % (path_, section, option))
             os.makedirs(path_)
         else:
             raise ValueError(
                 "path '%s' for '%s[%s]' is required to exist, but does not"
-                % (section, option))
+                % (path_, section, option))
     return path_
 
 def arg2bool(arg):
@@ -166,3 +168,66 @@ def arg2bool(arg):
     else:
         raise argparse.ArgumentTypeError(
                 "'%s' cannot be converted into a boolean" % arg)
+
+def get_base_workflow(name, args):
+    import nipype.pipeline.engine as pe
+    wdir = get_path_cfg('common', 'work directory',
+                        cli_input=args.workdir,
+                        ensure_exists=True,
+                        create_dir=True)
+
+    wf = pe.Workflow(name=name)
+    wf.base_dir = os.path.abspath(wdir)
+    wf.config['execution'] = {
+        'stop_on_first_crash': 'True',}
+    ##        'hash_method': 'timestamp'}
+    return wf
+
+def get_data_src(name, args, basedir, outfields, field_template,
+                 template_args=None):
+    import nipype.interfaces.io as nio
+    import nipype.pipeline.engine as pe
+
+    # data source config
+    data = nio.DataGrabber(outfields=outfields)
+    data.inputs.template = '*'
+    data.inputs.sort_filelist = True
+    data.inputs.base_directory = os.path.abspath(basedir)
+    data.inputs.field_template = field_template
+    if not template_args is None:
+        data.inputs.template_args = template_args
+    datasrc = pe.Node(name=name, interface=data)
+    return datasrc
+
+
+def get_dataset_subj_ids(args):
+    if not args.subjects is None:
+        subjs = []
+        for subj in args.subjects:
+            if subj.startswith('sub'):
+                subj = subj[3:]
+            int_subj = int(subj)
+            subjs.append(int_subj)
+    else:
+        basedir = get_dataset_dir(args)
+        subjs = [int(s[3:]) for s in os.listdir(basedir)
+                    if s.startswith('sub')
+                        and len(s) > 3
+                            and s[3].isdigit()]
+    return sorted(subjs)
+
+def get_dataset_dir(args):
+    datadir = get_path_cfg('common', 'data directory',
+                           cli_input=args.datadir,
+                           ensure_exists=True)
+    dataset = get_cfg_option('common', 'dataset', cli_input=args.dataset)
+    return opj(datadir, dataset)
+
+def exclude_subjects(subjects, section):
+    exclude = [int(s)
+                for s in get_cfg_option(section,
+                                        'exclude subjects',
+                                        default='').split()]
+
+    lgr.info("exclude subjects '%s' based on configuration'" % exclude)
+    return [s for s in subjects if not s in exclude]

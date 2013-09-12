@@ -54,9 +54,14 @@ workdir = (
     dict(help="""Path of a directory to hold intermediate processing results.""")
 )
 
-flavor = (
-    'flavor', ('--flavor',),
-    dict(help="""Suffix string to identify particular variants of data""")
+src_label = (
+    'src_label', ('--src-label',),
+    dict(help="""Base name of the respective source data files""")
+)
+
+label = (
+    'label', ('--label',),
+    dict(help="""Base name of the respective output data file(s)""")
 )
 
 subjects = (

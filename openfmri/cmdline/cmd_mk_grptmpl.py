@@ -6,7 +6,7 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
-"""Create a group template image from functional fMRI data
+"""Create a group template image
 """
 
 __docformat__ = 'restructuredtext'
@@ -21,20 +21,17 @@ import logging
 from os.path import join as opj
 
 from openfmri import cfg
-from .helpers import parser_add_common_args, get_path_cfg, get_cfg_option, \
-        arg2bool
+from . import helpers as hlp
 
 lgr = logging.getLogger(__name__)
 parser_args = dict(formatter_class=argparse.RawDescriptionHelpFormatter)
 
 
 def setup_parser(parser):
-    parser_add_common_args(parser,
+    hlp.parser_add_common_args(parser,
         opt=('datadir', 'dataset', 'subjects', 'workdir'))
-    parser_add_common_args(parser, required=True,
-        opt=('task',))
-    parser_add_common_args(parser, required=True, default='bold',
-        opt=('flavor',))
+    hlp.parser_add_common_args(parser, required=True, default='bold',
+        opt=('label',))
     parser.add_argument(
         '--zpad', type=int, default=0,
         help="""Number of slices to add above and below the z-slice stack
@@ -50,11 +47,13 @@ def setup_parser(parser):
         help="""ROI to trim the group space template to, given as
         x_min, x_size, y_min, y_size, z_min, z_size (voxel counts).
         Default: no trim""")
-    parser.add_argument('--apply-mni-sform', action='store_true',
+    parser.add_argument('--apply-mni-sform', type=hlp.arg2bool,
         help="""If set, the template image's sform matrix will contain
         the estimated transformation into MNI space, i.e. mm-cordinates
         will be actual MNI coordinates. CAUTION: the current implementation
         only works properly for radiological images! (hence OFF by default)""")
+    parser.add_argument('--grabber-expression',
+        help="""For the data grabber""")
 
 import sys
 import os                                    # system functions
@@ -70,7 +69,7 @@ def make_init_template(wf, datasink, lvl, brains, heads, target_resolution,
                        zpad=0):
     # pick one subject as the 1st-level reference
     best_reference = pe.Node(
-            name='pick_best_reference',
+            name='lvl%i_pick_best_reference' % lvl,
             interface=Function(
                 function=pick_closest_to_avg,
                 input_names=['in_files', 'in_aux'],
@@ -79,13 +78,13 @@ def make_init_template(wf, datasink, lvl, brains, heads, target_resolution,
     wf.connect(heads, 'out', best_reference, 'in_aux')
 
     zpad_head = pe.Node(
-            name='zpad_head',
+            name='lvl%i_zpad_head' % lvl,
             interface=Function(
                 function=zslice_pad,
                 input_names=['in_file', 'nslices'],
                 output_names=['padded_file']))
     zpad_head.inputs.nslices = 20
-    zpad_brain = zpad_head.clone('zpad_brain')
+    zpad_brain = zpad_head.clone('lvl%i_zpad_brain' % lvl)
     if zpad > 0:
         wf.connect(best_reference, 'out_head', zpad_head, 'in_file')
         wf.connect(best_reference, 'out_brain', zpad_brain, 'in_file')
@@ -93,12 +92,12 @@ def make_init_template(wf, datasink, lvl, brains, heads, target_resolution,
     # upsample 1stlvl reference
     # slight resolution bump for second iteration
     upsample_brain = pe.Node(
-            name='upsample_init_brain',
+            name='lvl%i_upsample_init_brain' % lvl,
             interface=afni.Resample(
                 args='-rmode Cu -dxyz %s' % ' '.join(['%.2f' % i for i in target_resolution])))
     upsample_brain.inputs.out_file='upsampled_brain.nii.gz'
     upsample_brain.inputs.outputtype='NIFTI_GZ'
-    upsample_head = upsample_brain.clone('upsample_init_head')
+    upsample_head = upsample_brain.clone('lvl%i_upsample_init_head' % lvl)
     upsample_head.inputs.out_file='upsampled_head.nii.gz'
     if zpad > 0:
         wf.connect(zpad_brain, 'padded_file', upsample_brain, 'in_file')
@@ -113,68 +112,68 @@ def make_init_template(wf, datasink, lvl, brains, heads, target_resolution,
     return upsample_brain, upsample_head
 
 
-def make_subj_preproc_branch(task, wf, subj, datadir, datasrc):
+def make_subj_preproc_branch(label, wf, subj, datadir, datasrc):
     subj_sink = pe.Node(
             interface=nio.DataSink(
                 parameterization=False,
                 base_directory=os.path.abspath(datadir),
-                container=subj,
+                container='sub%.3i' % subj,
                 regexp_substitutions=[
                     ('/[^/]*\.nii', '.nii'),
                 ]),
-            name="subj_sink_%s" % subj,
+            name="sub%.3i_sink" % subj,
             overwrite=True)
 
     # mean vol for each run
     make_samplevols = pe.MapNode(
-            name='make_samplevol_%s' % subj,
+            name='sub%.3i_make_samplevol' % subj,
     #        interface=fsl.ImageMaths(op_string='-Tmean'),
             interface=fsl.ExtractROI(t_min=0, t_size=1),
             iterfield=['in_file'])
-    wf.connect(datasrc, 'bold_runs_%s' % subj, make_samplevols, 'in_file')
+    wf.connect(datasrc, 'in_files_sub%.3i' % subj, make_samplevols, 'in_file')
     # merge all samplevols to 4D for alignment
     merge_samplevols = pe.Node(
-            name='merge_samplevols_%s' % subj,
+            name='sub%.3i_merge_samplevols' % subj,
             interface=fsl.Merge(dimension='t'))
     #wf.connect(make_samplevols, 'out_file', merge_samplevols, 'in_files')
     wf.connect(make_samplevols, 'roi_file', merge_samplevols, 'in_files')
     # 4D alignment across runs
     align_samplevols = pe.Node(
-            name='align_samplevols_%s' % subj,
+            name='sub%.3i_align_samplevols' % subj,
             interface=fsl.MCFLIRT(
                 ref_vol=0,
                 stages=4))
     wf.connect(merge_samplevols, 'merged_file', align_samplevols, 'in_file')
     wf.connect(align_samplevols, 'out_file',
-               subj_sink, 'qa.%s.aligned_head_samples.@out' % task)
+               subj_sink, 'qa.%s.aligned_head_samples.@out' % label)
     # merge all aligned volumes into a normalized subject template
     make_subj_tmpl = pe.Node(
-            name='make_subj_tmpl_%s' % subj,
+            name='sub%.3i_make_subj_tmpl' % subj,
             interface=Function(
                 function=nonzero_normed_avg,
                 input_names=['in_file'],
                 output_names=['out_file', 'avg_stats']))
     wf.connect(align_samplevols, 'out_file', make_subj_tmpl, 'in_file')
     wf.connect(make_subj_tmpl, 'out_file',
-               subj_sink, 'qa.%s.head.@out' % task)
+               subj_sink, 'qa.%s.head.@out' % label)
     wf.connect(make_subj_tmpl, 'avg_stats',
-               subj_sink, 'qa.%s.head_avgstats.@out' % task)
+               subj_sink, 'qa.%s.head_avgstats.@out' % label)
     # extract brain from subject template
     subj_bet = pe.Node(
-            name='subj_bet_%s' % subj,
+            name='sub%.3i_bet' % subj,
             interface=fsl.BET(
                   padding=True,
                   frac=0.15))
     wf.connect(make_subj_tmpl, 'out_file', subj_bet, 'in_file')
     wf.connect(subj_bet, 'out_file',
-               subj_sink, 'qa.%s.brain.@out' % task)
+               subj_sink, 'qa.%s.brain.@out' % label)
 
     return subj_bet, make_subj_tmpl
 
 def align_subj_to_tmpl_lin(wf, subj, lvl, brain_tmpl, head_tmpl, brain, head,
                        last_linear_align):
     align_brain_to_template = pe.Node(
-            name='align_brain_to_template_lvl%i_%s' % (lvl, subj),
+            name='sub%.3i_align_brain_to_template_lvl%i' % (subj, lvl),
             interface=fsl.FLIRT(
                 #no_search=True,
                 #cost='normmi',
@@ -195,7 +194,7 @@ def align_subj_to_tmpl_lin(wf, subj, lvl, brain_tmpl, head_tmpl, brain, head,
 
     # project the subject's head image onto the 1st-level template
     project_head_to_template = pe.Node(
-        name='project_head_to_template_lvl%i_%s' % (lvl, subj),
+        name='sub%.3i_project_head_to_template_lvl%i' % (subj, lvl),
         interface=fsl.ApplyXfm(
             interp='trilinear',
             apply_xfm=True))
@@ -211,7 +210,7 @@ def align_subj_to_tmpl_lin(wf, subj, lvl, brain_tmpl, head_tmpl, brain, head,
 def align_subj_to_tmpl_nlin(wf, subj, lvl, brain_tmpl, head_tmpl, head, last_linear_align):
     # determine soft intersection mask
     soft_interssection = pe.Node(
-            name='soft_intersection_lvl%i_%s' % (lvl, subj),
+            name='sub%.3i_soft_intersection_lvl%i' % (subj, lvl),
             interface=Function(
                 function=max_thresh_mask,
                 input_names=['in_file', 'mask_file', 'max_offset'],
@@ -229,7 +228,7 @@ def align_subj_to_tmpl_nlin(wf, subj, lvl, brain_tmpl, head_tmpl, head, last_lin
     # TODO: extend with inmask
 
     align_head_to_tmpl = pe.Node(
-            name='align_head_to_tmpl_lvl%i_%s' % (lvl, subj),
+            name='sub%.3i_align_head_to_tmpl_lvl%i' % (subj, lvl),
             interface=fsl.FNIRT(
                 intensity_mapping_model='global_non_linear_with_bias',
                 #intensity_mapping_model='local_non_linear',
@@ -250,13 +249,13 @@ def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
                       linear):
     # merge and average for new template
     merge_heads = pe.Node(
-                name='merge_heads_lvl%i' % lvl,
+                name='lvl%i_merge_heads' % lvl,
                 interface=fsl.Merge(dimension='t'))
     wf.connect(merge_heads, 'merged_file',
                datasink, 'qa.lvl%i.aligned_head_samples.@out' % lvl)
 
     make_head_tmpl = pe.Node(
-            name='make_head_tmpl_lvl%i' % lvl,
+            name='lvl%i_make_head_tmpl' % lvl,
             interface=Function(
                 function=nonzero_normed_avg,
                 input_names=['in_file'],
@@ -270,12 +269,12 @@ def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
 
     if linear:
         merge_brains = pe.Node(
-                    name='merge_brains_lvl%i' % lvl,
+                    name='lvl%i_merge_brains' % lvl,
                     interface=fsl.Merge(dimension='t'))
         wf.connect(merge_brains, 'merged_file',
                    datasink, 'qa.lvl%i.aligned_brain_samples.@out' % lvl)
         make_brain_tmpl = pe.Node(
-                name='make_brain_tmpl_lvl%i' % lvl,
+                name='lvl%i_make_brain_tmpl' % lvl,
                 interface=Function(
                     function=nonzero_normed_avg,
                     input_names=['in_file'],
@@ -290,7 +289,7 @@ def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
     else:
         # skull-strip the head template
         tmpl_bet = pe.Node(
-            name='tmpl_bet_lvl%i' % lvl,
+            name='lvl%i_tmpl_bet' % lvl,
             interface=fsl.BET(
                   padding=True,
                   mask=True,
@@ -333,7 +332,7 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
     # only rigid body plus rescale -- the average should be a pretty good
     # match with MNI -- deals with small brain coverage
     align2mni_9dof = pe.Node(
-            name='align2mni_7dof',
+            name='mni_tmplalign_9dof',
             interface=fsl.FLIRT(
                 bins=256, cost='corratio',
                 searchr_x=[-90, 90], searchr_y=[-90, 90],
@@ -345,7 +344,7 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
                 reference=mni_tmpl
             ))
     align2mni_12dof = pe.Node(
-            name='align2mni_12dof',
+            name='mni_tmplalign_12dof',
             interface=fsl.FLIRT(
                 cost='corratio',
                 no_search=True,
@@ -374,7 +373,7 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
         wf.connect(mni_sform_brain, 'out_file', datasink, 'brain.@out')
 
     invert_xfm_epi2mni_12dof = pe.Node(
-            name='invert_xfm_epi2mni_12dof',
+            name='mni_invert_tmplalign_xfm',
             interface=fsl.ConvertXFM(invert_xfm=True))
     wf.connect(align2mni_12dof, 'out_matrix_file',
                invert_xfm_epi2mni_12dof, 'in_file')
@@ -389,7 +388,7 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
     ])
     # grab MNI152 property images and project them back
     xfm_mni_12dof_in_epi_lin = pe.MapNode(
-            name='xfm_mni_12dof_in_epi_lin',
+            name='mni_xfm_affine',
             interface=fsl.ApplyXfm(
                 args="-interp trilinear",
                 apply_xfm=True),
@@ -404,13 +403,13 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
     wf.connect(invert_xfm_epi2mni_12dof, 'out_file',
                xfm_mni_12dof_in_epi_lin, 'in_matrix_file')
     if set_mni_sform:
-        wf.connect(mni_sform_brain, 'out_file',
+        wf.connect(mni_sform_brain, out_slot,
                    xfm_mni_12dof_in_epi_lin, 'reference')
     else:
-        wf.connect(brain_tmpl, 'out_file',
+        wf.connect(brain_tmpl, out_slot,
                    xfm_mni_12dof_in_epi_lin, 'reference')
     xfm_mni_12dof_in_epi_lin_masks = pe.MapNode(
-            name='xfm_mni_12dof_in_epi_lin_masks',
+            name='mni_xfm_affine_mask',
             interface=fsl.ApplyXfm(
                 args="-interp trilinear",
                 apply_xfm=True),
@@ -427,7 +426,7 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
         wf.connect(mni_sform_brain, 'out_file',
                    xfm_mni_12dof_in_epi_lin_masks, 'reference')
     else:
-        wf.connect(brain_tmpl, 'out_file',
+        wf.connect(brain_tmpl, out_slot,
                    xfm_mni_12dof_in_epi_lin_masks, 'reference')
 
     # datasink connections
@@ -441,43 +440,21 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
     ])
 
 
-def get_epi_tmpl_workflow(subjects,
-                          dataset,
-                          task,
+def get_epi_tmpl_workflow(wf, datasrc,
+                          subjects,
+                          label,
                           target_resolution,
-                          flavor,
                           datadir=os.path.abspath(os.curdir),
-                          basedir=os.path.abspath(os.path.join(os.curdir, 'pipe_tmp')),
                           lin=3, nlin=2,
                           zpad=0,
                           template_roi=None,
                           set_mni_sform=False):
-    # WORKFLOW
-    wf = pe.Workflow(name="grptmpl_%s_%.3i_%s" % (dataset, task, flavor))
-    wf.base_dir = os.path.abspath(basedir)
-    wf.config['execution'] = {
-        'stop_on_first_crash': 'True',}
-    ##        'hash_method': 'timestamp'}
-
-    # data source config
-    data = nio.DataGrabber(
-        outfields=['bold_runs_%s' % s for s in subjects]
-    )
-    data.inputs.template = '*'
-    data.inputs.sort_filelist = False
-    data.inputs.base_directory = os.path.abspath(datadir)
-    data.inputs.field_template = dict(
-        [('bold_runs_%s' %s, '%s/BOLD/task%.3i_run*/%s.nii*' % (s, task, flavor))
-            for s in subjects]
-        )
-    datasrc = pe.Node(name='datasrc', interface=data)
-
     # data sink
     datasink = pe.Node(
         interface=nio.DataSink(
             parameterization=False,
             base_directory=os.path.abspath(os.path.join(datadir, 'templates')),
-            container='task%.3i' % task,
+            container=label,
             regexp_substitutions=[
                 ('/[^/]*\.nii', '.nii'),
             ]),
@@ -492,10 +469,10 @@ def get_epi_tmpl_workflow(subjects,
     for lvl in range(lin + nlin + 1):
         print 'Level %i' % lvl
         brains = pe.Node(
-                name='subjs_brains_lvl%i' % lvl,
+                name='lvl%i_subjs_brains' % lvl,
                 interface=util.Merge(len(subjects)))
         heads = pe.Node(
-                name='subjs_heads_lvl%i' % lvl,
+                name='lvl%i_subjs_heads' % lvl,
                 interface=util.Merge(len(subjects)))
         if lvl == 0:
             brain_tmpl, head_tmpl = make_init_template(wf, datasink, lvl,
@@ -507,7 +484,7 @@ def get_epi_tmpl_workflow(subjects,
                                         lvl <= lin)
         for i, subj in enumerate(subjects):
             if lvl == 0:
-                brain, head = make_subj_preproc_branch('task%.3i' % task,
+                brain, head = make_subj_preproc_branch('template_%s' % label,
                                     wf, subj, datadir, datasrc)
                 subj_nodes[subj] = (brain, head)
             else:
@@ -559,52 +536,56 @@ def get_epi_tmpl_workflow(subjects,
 
 
 def run(args):
-    target_res = get_cfg_option('functional group template', 'resolution',
-                               cli_input=args.target_resolution)
+    # label of the group template -- used to look up config options
+    label = args.label
+    cfg_section = 'group template %s' % label
+
+    dataset = hlp.get_cfg_option('common', 'dataset', cli_input=args.dataset)
+
+    target_res = hlp.get_cfg_option(cfg_section, 'resolution',
+                                    cli_input=args.target_resolution)
     if isinstance(target_res, basestring):
         target_res = [float(i) for i in target_res.split()]
-    roi = get_cfg_option('functional group template', 'trim roi',
+
+    roi = hlp.get_cfg_option(cfg_section, 'trim roi',
                         cli_input=args.trim_roi)
     if isinstance(roi, basestring):
         roi = [int(i) for i in roi.split()]
 
-    datadir=get_path_cfg('common',
-                        'data directory',
-                        cli_input=args.datadir,
-                        ensure_exists=True)
-    datadir = opj(datadir, args.dataset)
+    subjects = hlp.get_dataset_subj_ids(args)
+    subjects = hlp.exclude_subjects(subjects, cfg_section)
 
-    wf = get_epi_tmpl_workflow(['sub%s' % s for s in args.subjects],
-                               args.dataset,
-                               args.task,
+    print subjects
+    dsdir = hlp.get_dataset_dir(args)
+
+    wf_name = "grptmpl_%s_%s" % (label, dataset)
+    wf = hlp.get_base_workflow(wf_name.replace('.', '_'), args)
+
+    grabber_exp = hlp.get_cfg_option(
+                    cfg_section,
+                    'data grabber expression',
+                    cli_input=args.grabber_expression)
+
+    datasrc = hlp.get_data_src('datasrc', args, dsdir,
+                outfields=['in_files_sub%.3i' % s for s in subjects],
+                field_template = dict(
+                    [('in_files_sub%.3i' % s, grabber_exp % dict(subj='sub%.3i' % s))
+                            for s in subjects]))
+
+    wf = get_epi_tmpl_workflow(wf, datasrc,
+                               subjects,
+                               label,
                                target_res,
-                               get_cfg_option('functional group template',
-                                              'source data flavor',
-                                              cli_input=args.flavor),
-                               datadir,
-                               basedir=get_path_cfg('common',
-                                                    'working directory',
-                                                    cli_input=args.workdir),
-                               lin=2,
+                               dsdir,
+                               lin=1,
                                nlin=0,
-                               zpad=get_cfg_option('functional group template',
+                               zpad=hlp.get_cfg_option('functional group template',
                                                    'z-pad slices',
                                                    cli_input=args.zpad),
                                template_roi=roi,
-                               set_mni_sform=arg2bool(
-                                   get_cfg_option('functional group template',
+                               set_mni_sform=hlp.arg2bool(
+                                   hlp.get_cfg_option('functional group template',
                                                   'set mni sform',
                                                   cli_input=args.apply_mni_sform)))
 
-#wf.write_graph(graph2use='flat')
-    #wf.run(plugin='CondorDAGMan')
-    wf.run()
-
-
-
-
-
-
-
-
-
+    return wf

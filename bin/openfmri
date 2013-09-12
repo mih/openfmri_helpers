@@ -91,6 +91,9 @@ parser.add_argument('-c', '--cfg', '--config',
                     dest='common_config_file', nargs=1,
                     help="""configuration file with settings to overwrite all
                          defaults and configurations from other locations.""")
+parser.add_argument('--run-plugin',
+                    help="""Nipype plugin for executing workflows.
+                    Default: serial execution one the local machine""")
 
 # subparsers
 subparsers = parser.add_subparsers()
@@ -172,7 +175,11 @@ if not args.common_config_file is None and not os.path.isfile(args.common_config
                      % args.common_config_file[0])
 # run the function associated with the selected command
 try:
-    args.func(args)
+    # return the workflow
+    wf = args.func(args)
+    # TODO add option to export graph scheme
+    #wf.write_graph(graph2use='flat')
+    wf.run(plugin=args.run_plugin)
 except Exception as exc:
     lgr.error('%s (%s)' % (str(exc), exc.__class__.__name__))
     if args.common_debug:
