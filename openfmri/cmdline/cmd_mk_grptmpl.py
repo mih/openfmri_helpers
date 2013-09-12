@@ -234,25 +234,6 @@ def align_subj_to_tmpl_lin(wf, subj, lvl, brain_tmpl, head_tmpl, brain, head,
     return align_brain_to_template, project_head_to_template
 
 def align_subj_to_tmpl_nlin(wf, subj, lvl, brain_tmpl, head_tmpl, head, last_linear_align):
-    # determine soft intersection mask
-    soft_interssection = pe.Node(
-            name='sub%.3i_soft_intersection_lvl%i' % (subj, lvl),
-            interface=Function(
-                function=max_thresh_mask,
-                input_names=['in_file', 'mask_file', 'max_offset'],
-                output_names=['out_file']))
-    soft_interssection.inputs.max_offset = 0.8
-    wf.connect(head_tmpl, 'avg_stats',
-               soft_interssection, 'in_file')
-    try:
-        wf.connect(brain_tmpl, 'mask_file',
-               soft_interssection, 'mask_file')
-    except:
-        wf.connect(brain_tmpl, 'avg_stats',
-               soft_interssection, 'mask_file')
-
-    # TODO: extend with inmask
-
     align_head_to_tmpl = pe.Node(
             name='sub%.3i_align_head_to_tmpl_lvl%i' % (subj, lvl),
             interface=fsl.FNIRT(
@@ -262,8 +243,6 @@ def align_subj_to_tmpl_nlin(wf, subj, lvl, brain_tmpl, head_tmpl, head, last_lin
                 #warp_resolution=(7, 7, 7)))
     wf.connect(head, 'out_file',
                align_head_to_tmpl, 'in_file')
-    wf.connect(soft_interssection, 'out_file',
-               align_head_to_tmpl, 'refmask_file')
     wf.connect(head_tmpl, 'out_file',
                align_head_to_tmpl, 'ref_file')
     wf.connect(last_linear_align, 'out_matrix_file',
