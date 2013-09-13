@@ -315,6 +315,7 @@ def trim_tmpl(wf, tmpl, name, roi):
                 y_min=y_min, y_size=y_size,
                 z_min=z_min, z_size=z_size))
     wf.connect(tmpl, 'out_file', trim_template, 'in_file')
+    return trim_template
 
 def final_bet(wf, head_tmpl, slot_name, padding=False, frac=0.5,
               gradient=0):
@@ -540,7 +541,9 @@ def get_epi_tmpl_workflow(wf, datasrc,
         latest_brain_tmpl = final_bet(wf, latest_head_tmpl, out_slot,
                                       bet_padding, tmpl_bet_frac,
                                       tmpl_bet_gradient)
-    wf.connect(latest_brain_tmpl, out_slot, datasink, 'brain.@out')
+        wf.connect(latest_brain_tmpl, 'out_file', datasink, 'brain.@out')
+    else:
+        wf.connect(latest_brain_tmpl, out_slot, datasink, 'brain.@out')
     wf.connect(latest_head_tmpl, out_slot, datasink, 'head.@out')
 
     make_MNI_alignment(wf, mni_sink, latest_brain_tmpl, latest_head_tmpl,
@@ -568,7 +571,6 @@ def run(args):
     subjects = hlp.get_dataset_subj_ids(args)
     subjects = hlp.exclude_subjects(subjects, cfg_section)
 
-    print subjects
     dsdir = hlp.get_dataset_dir(args)
 
     wf_name = "grptmpl_%s_%s" % (label, dataset)
