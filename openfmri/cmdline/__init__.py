@@ -11,3 +11,4 @@
 __docformat__ = 'restructuredtext'
 
 import cmd_mk_grptmpl
+import cmd_align2tmpl

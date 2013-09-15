@@ -194,3 +194,14 @@ def update_sform2mni(in_file, xfm, reference):
     in_hdr.set_sform(sform, code='mni')
     nb.Nifti1Image(in_img.get_data(), sform, in_hdr).to_filename('updated_sform.nii.gz')
     return os.path.abspath('updated_sform.nii.gz')
+
+def fix_xfm_after_zpad(xfm, reference, nslices):
+    import os
+    import numpy as np
+    import nibabel as nb
+    ref_hdr = nb.load(reference).get_header()
+    xfm_mat = np.matrix(np.loadtxt(xfm))
+    zpixdim = ref_hdr.get_zooms()[-1]
+    xfm_mat[2,3] -= nslices * zpixdim
+    np.savetxt('fixed.mat', xfm_mat)
+    return os.path.abspath('fixed.mat')
