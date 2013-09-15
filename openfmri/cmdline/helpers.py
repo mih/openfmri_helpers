@@ -199,6 +199,18 @@ def get_data_src(name, args, basedir, outfields, field_template,
     datasrc = pe.Node(name=name, interface=data)
     return datasrc
 
+def get_data_finder(name, basedir, match_regex, ignore_regexes=None):
+    import nipype.interfaces.io as nio
+    import nipype.pipeline.engine as pe
+    df = nio.DataFinder()
+    df.inputs.root_paths = basedir
+    df.inputs.match_regex = match_regex
+    lgr.debug("configuring data finder: basepath '%s', match_regex '%s'"
+                      % (basedir, match_regex))
+    if not ignore_regexes is None:
+        df.inputs.ignore_regexes = ignore_regexes
+    datasrc = pe.Node(name=name, interface=df)
+    return datasrc
 
 def get_dataset_subj_ids(args):
     if not args.subjects is None:

@@ -30,7 +30,7 @@ parser_args = dict(formatter_class=argparse.RawDescriptionHelpFormatter)
 def setup_parser(parser):
     hlp.parser_add_common_args(parser,
         opt=('datadir', 'dataset', 'subjects', 'workdir'))
-    hlp.parser_add_common_args(parser, required=True, default='bold',
+    hlp.parser_add_common_args(parser, required=True,
         opt=('label',))
     parser.add_argument(
         '--linear', type=int,
@@ -59,8 +59,8 @@ def setup_parser(parser):
         the estimated transformation into MNI space, i.e. mm-cordinates
         will be actual MNI coordinates. CAUTION: the current implementation
         only works properly for radiological images! (hence OFF by default)""")
-    parser.add_argument('--grabber-expression',
-        help="""For the data grabber""")
+    parser.add_argument('--input-expression',
+        help="""For the data input""")
     parser.add_argument('--final-skullstrip', type=hlp.arg2bool,
         help="""If true, the final brain-extracted template image is created
         by a final skull-stripping of the head template image.""")
@@ -149,7 +149,7 @@ def make_subj_preproc_branch(label, wf, subj, datadir, datasrc,
     #        interface=fsl.ImageMaths(op_string='-Tmean'),
             interface=fsl.ExtractROI(t_min=0, t_size=1),
             iterfield=['in_file'])
-    wf.connect(datasrc, 'in_files_sub%.3i' % subj, make_samplevols, 'in_file')
+    wf.connect(datasrc, 'out_paths', make_samplevols, 'in_file')
     # merge all samplevols to 4D for alignment
     merge_samplevols = pe.Node(
             name='sub%.3i_merge_samplevols' % subj,
@@ -372,7 +372,7 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
     if set_mni_sform:
         wf.connect(brain_tmpl, out_slot, mni_sform_brain, 'in_file')
         wf.connect(align2mni_12dof, 'out_matrix_file', mni_sform_brain, 'xfm')
-        wf.connect(mni_sform_brain, 'out_file', datasink, 'brain.@out')
+        wf.connect(mni_sform_brain, 'out_file', datasink, 'brain.@mni')
 
     invert_xfm_epi2mni_12dof = pe.Node(
             name='mni_invert_tmplalign_xfm',
@@ -442,7 +442,7 @@ def make_MNI_alignment(wf, datasink, brain_tmpl, head_tmpl, set_mni_sform=True):
     ])
 
 
-def get_epi_tmpl_workflow(wf, datasrc,
+def get_epi_tmpl_workflow(wf, datasrcs,
                           subjects,
                           label,
                           target_resolution,
@@ -495,7 +495,7 @@ def get_epi_tmpl_workflow(wf, datasrc,
         for i, subj in enumerate(subjects):
             if lvl == 0:
                 brain, head = make_subj_preproc_branch('template_%s' % label,
-                                    wf, subj, datadir, datasrc,
+                                    wf, subj, datadir, datasrcs[subj],
                                     bet_frac=subj_bet_frac,
                                     bet_padding=bet_padding)
                 subj_nodes[subj] = (brain, head)
@@ -541,9 +541,11 @@ def get_epi_tmpl_workflow(wf, datasrc,
         latest_brain_tmpl = final_bet(wf, latest_head_tmpl, out_slot,
                                       bet_padding, tmpl_bet_frac,
                                       tmpl_bet_gradient)
-        wf.connect(latest_brain_tmpl, 'out_file', datasink, 'brain.@out')
+        if not set_mni_sform:
+            wf.connect(latest_brain_tmpl, 'out_file', datasink, 'brain.@out')
     else:
-        wf.connect(latest_brain_tmpl, out_slot, datasink, 'brain.@out')
+        if not set_mni_sform:
+            wf.connect(latest_brain_tmpl, out_slot, datasink, 'brain.@out')
     wf.connect(latest_head_tmpl, out_slot, datasink, 'head.@out')
 
     make_MNI_alignment(wf, mni_sink, latest_brain_tmpl, latest_head_tmpl,
@@ -576,18 +578,18 @@ def run(args):
     wf_name = "grptmpl_%s_%s" % (label, dataset)
     wf = hlp.get_base_workflow(wf_name.replace('.', '_'), args)
 
-    grabber_exp = hlp.get_cfg_option(
+    input_exp = hlp.get_cfg_option(
                     cfg_section,
-                    'data grabber expression',
-                    cli_input=args.grabber_expression)
+                    'input expression',
+                    cli_input=args.input_expression)
+    datasrcs = dict([(subj,
+                      hlp.get_data_finder(
+                        'sub%.3i_datasrc' % subj,
+                        dsdir,
+                        input_exp % dict(subj='sub%.3i' % subj)))
+                            for subj in subjects])
 
-    datasrc = hlp.get_data_src('datasrc', args, dsdir,
-                outfields=['in_files_sub%.3i' % s for s in subjects],
-                field_template = dict(
-                    [('in_files_sub%.3i' % s, grabber_exp % dict(subj='sub%.3i' % s))
-                            for s in subjects]))
-
-    wf = get_epi_tmpl_workflow(wf, datasrc, subjects, label,
+    wf = get_epi_tmpl_workflow(wf, datasrcs, subjects, label,
             target_res,
             dsdir,
             lin=int(hlp.get_cfg_option(cfg_section,
