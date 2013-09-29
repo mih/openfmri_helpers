@@ -67,6 +67,10 @@ def setup_parser(parser):
         help="""Gradient parameter for the template skullstripping""")
     parser.add_argument('--subj-bet-frac', type=float,
         help="""Frac parameter for skullstripping subject images""")
+    parser.add_argument('--nonlin-mapping-model',
+        choices=('none', 'global_linear', 'global_non_linear', 'local_linear',
+                 'global_non_linear_with_bias', 'local_non_linear'),
+        help="""Intensity mapping model for FNIRT""")
 
 import sys
 import os                                    # system functions
@@ -228,11 +232,13 @@ def align_subj_to_tmpl_lin(wf, subj, lvl, brain_tmpl, head_tmpl, brain, head,
 
     return align_brain_to_template, project_head_to_template
 
-def align_subj_to_tmpl_nlin(wf, subj, lvl, brain_tmpl, head_tmpl, head, last_linear_align):
+def align_subj_to_tmpl_nlin(wf, subj, lvl, brain_tmpl, head_tmpl, head,
+                            last_linear_align, intmod):
     align_head_to_tmpl = pe.Node(
             name='sub%.3i_align_head_to_tmpl_lvl%i' % (subj, lvl),
             interface=fsl.FNIRT(
-                intensity_mapping_model='global_non_linear_with_bias',
+                intensity_mapping_model=intmod,
+                #intensity_mapping_model='global_non_linear_with_bias',
                 #intensity_mapping_model='local_non_linear',
                 warp_resolution=(10, 10, 10)))
                 #warp_resolution=(7, 7, 7)))
@@ -450,7 +456,8 @@ def get_epi_tmpl_workflow(wf, datasrcs,
                           bet_padding=False,
                           subj_bet_frac=0.5,
                           tmpl_bet_frac=0.5,
-                          tmpl_bet_gradient=0
+                          tmpl_bet_gradient=0,
+                          intmod='global_non_linear_with_bias'
                           ):
     # data sink
     datasink = pe.Node(
@@ -510,7 +517,8 @@ def get_epi_tmpl_workflow(wf, datasrcs,
                             wf, subj, lvl,
                             latest_brain_tmpl,
                             latest_head_tmpl, head,
-                            last_linear_align[subj])
+                            last_linear_align[subj],
+                            intmod)
             wf.connect(brain, 'out_file', brains, 'in%i' % (i + 1))
             try:
                 wf.connect(head, 'warped_file', heads, 'in%i' % (i + 1))
@@ -635,7 +643,12 @@ def run(args):
                             cfg_section,
                             'template bet gradient',
                             cli_input=args.tmpl_bet_gradient,
-                            default=0))
+                            default=0)),
+            intmod=hlp.get_cfg_option(
+                            cfg_section,
+                            'nonlin intensity mapping',
+                            cli_input=args.nonlin_mapping_model,
+                            default='global_non_linear_with_bias')
             )
 
     return wf
