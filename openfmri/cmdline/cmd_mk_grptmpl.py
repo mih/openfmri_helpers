@@ -29,7 +29,7 @@ parser_args = dict(formatter_class=argparse.RawDescriptionHelpFormatter)
 
 def setup_parser(parser):
     hlp.parser_add_common_args(parser,
-        opt=('datadir', 'dataset', 'subjects', 'workdir'))
+        opt=('datadir', 'dataset', 'subjects', 'workdir', 'zslice_padding'))
     hlp.parser_add_common_args(parser, required=True,
         opt=('label',))
     parser.add_argument(
@@ -39,11 +39,6 @@ def setup_parser(parser):
         '--nonlin', type=int,
         help="""Number of iterations of non-linear alignments. Experimental and
         disabled by default""")
-    parser.add_argument(
-        '--zpad', type=int,
-        help="""Number of slices to add above and below the z-slice stack
-        in the initial template image. This can aid alignment of images
-        with small FOV in z-direction. Default: 0""")
     parser.add_argument(
         '--target-resolution', type=float, nargs=3, metavar='DIM',
         help="""Spatial target resolution of the group template in XYZ.
@@ -601,8 +596,8 @@ def run(args):
                                         cli_input=args.nonlin,
                                         default=0)),
             zpad=int(hlp.get_cfg_option(cfg_section,
-                                        'z-slice padding',
-                                        cli_input=args.zpad,
+                                        'zslice padding',
+                                        cli_input=args.zslice_padding,
                                         default=0)),
             template_roi=roi,
             set_mni_sform=hlp.arg2bool(

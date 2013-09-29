@@ -40,12 +40,15 @@ def zslice_pad(in_file, nslices):
     in_hdr = in_img.get_header()
     in_data = in_img.get_data()
     dshape = list(in_data.shape)
-    dshape[2] = in_data.shape[2] + 2 * nslices
-    out_data = np.zeros(dshape, dtype=in_data.dtype)
-    out_data[:,:,nslices:-nslices] = in_data
-    # fix image transform
     xfm = in_img.get_affine()
-    xfm[2,3] -= in_hdr.get_zooms()[2] * nslices
+    if nslices > 0:
+        dshape[2] = in_data.shape[2] + 2 * nslices
+        out_data = np.zeros(dshape, dtype=in_data.dtype)
+        out_data[:,:,nslices:-nslices] = in_data
+        # fix image transform
+        xfm[2,3] -= in_hdr.get_zooms()[2] * nslices
+    else:
+        out_data = in_data
     nb.Nifti1Image(out_data, xfm).to_filename('zslice_padded.nii.gz')
     return os.path.abspath('zslice_padded.nii.gz')
 

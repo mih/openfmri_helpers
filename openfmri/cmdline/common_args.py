@@ -69,3 +69,11 @@ subjects = (
     dict(nargs='*',
          help="""List of IDs of subjects to process.""")
 )
+
+zslice_padding = (
+    'zslice-padding', ('--zslice-padding',),
+    dict(type=int,
+        help="""Number of slices to add above and below the z-slice stack
+        of the template image. This can aid alignment of images with small
+        FOV in z-direction.""")
+)

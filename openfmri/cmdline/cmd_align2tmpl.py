@@ -35,7 +35,7 @@ from ..nipype_helpers import *
 
 def setup_parser(parser):
     hlp.parser_add_common_args(parser,
-        opt=('datadir', 'dataset', 'subjects', 'workdir'))
+        opt=('datadir', 'dataset', 'subjects', 'workdir', 'zslice_padding'))
     hlp.parser_add_common_args(parser, required=True,
         opt=('label',))
     parser.add_argument('--input-expression',
@@ -46,15 +46,23 @@ def setup_parser(parser):
         help="""Enable padding for BET""")
     parser.add_argument('--bet-frac', type=float,
         help="""Frac parameter for the skullstripping""")
+    parser.add_argument('--search-radius', type=int,
+        help="""For linear alignment""")
+    parser.add_argument('--warp-resolution', type=float,
+        help="""For non-linear alignment""")
+    parser.add_argument('--non-linear', type=hlp.arg2bool,
+        help="""Perform an additional non-linear step for alignment""")
 
 
 def proc(label, tmpl_label, template, wf, subj, input, dsdir,
-         bet_frac=0.5, bet_padding=False):
+         non_linear=False, bet_frac=0.5, bet_padding=False, search_radius=0,
+         warp_resolution=5, zpad=0):
     import hashlib
 
     basename = os.path.basename(input)
     basename = basename[:basename.index('.')]
     brain_reference = opj(dsdir, 'templates', tmpl_label, 'brain.nii.gz')
+    head_reference = opj(dsdir, 'templates', tmpl_label, 'head.nii.gz')
 
     hash = hashlib.md5(input).hexdigest()
     sink = pe.Node(
@@ -62,7 +70,8 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
                 parameterization=False,
                 base_directory=os.path.abspath(os.path.dirname(input)),
                 regexp_substitutions=[
-                    ('/[^/]*\.nii', '_in_tmpl_%s.nii' % tmpl_label),
+                    ('/[^/]*\.nii', '_%s.nii' % label),
+                    ('/[^/]*\.mat', '_%s.mat' % label),
                 ]),
             name="sub%.3i_sink_%s" % (subj, hash),
             overwrite=True)
@@ -89,13 +98,15 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             name='sub%.3i_align2tmpl_%s' % (subj, hash),
             interface=fsl.FLIRT(
                 cost='corratio',
-                no_search=True,
                 uses_qform=True,
-                #searchr_x=[-90, 90],
-                #searchr_y=[-90, 90],
-                #searchr_z=[-90, 90],
                 dof=12,
                 args="-interp trilinear"))
+    if search_radius:
+        align2template.inputs.searchr_x = [(-1) * search_radius, search_radius]
+        align2template.inputs.searchr_y = [(-1) * search_radius, search_radius]
+        align2template.inputs.searchr_z = [(-1) * search_radius, search_radius]
+    else:
+        align2template.inputs.no_search = True
     wf.connect(subj_bet, 'out_file', align2template, 'in_file')
     wf.connect(template, 'out_file', align2template, 'reference')
 
@@ -105,12 +116,9 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
                 function=fix_xfm_after_zpad,
                 input_names=['xfm', 'reference', 'nslices'],
                 output_names=['out_file']))
-    #zpad_brain.inputs.nslices = zpad
-    fix_xfm.inputs.nslices = 20
+    fix_xfm.inputs.nslices = zpad
     wf.connect(template, 'out_file', fix_xfm, 'reference')
     wf.connect(align2template, 'out_matrix_file', fix_xfm, 'xfm')
-    wf.connect(fix_xfm, 'out_file', sink, '%s_xfm.@out' % basename)
-
 
     mask2tmpl_lin = pe.Node(
             name='sub%.3i_mask2tmpl_lin_%s' % (subj, hash),
@@ -122,7 +130,57 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
     wf.connect(subj_bet, 'mask_file', mask2tmpl_lin, 'in_file')
     wf.connect(mask2tmpl_lin, 'out_file', sink, '%s_brainmask.@out' % basename)
 
-    return align2template, mask2tmpl_lin
+    if not non_linear:
+        data2tmpl_lin = pe.Node(
+                name='sub%.3i_data2tmpl_lin_%s' % (subj, hash),
+            interface=fsl.ApplyXfm(
+                interp='trilinear',
+                reference=brain_reference,
+                in_file=input,
+                apply_xfm=True))
+        wf.connect(fix_xfm, 'out_file', data2tmpl_lin, 'in_matrix_file')
+        wf.connect(fix_xfm, 'out_file', sink, '%s_xfm.@out' % basename)
+        wf.connect(data2tmpl_lin, 'out_file', sink, '%s.@out' % basename)
+        return align2template, mask2tmpl_lin
+
+    # and non-linear
+    align2template_nl = pe.Node(
+            name='sub%.3i_align2tmpl_nonlin_%s' % (subj, hash),
+            interface=fsl.FNIRT(
+                intensity_mapping_model='global_non_linear_with_bias',
+                field_file=True,
+                ref_file=head_reference,
+                warp_resolution=tuple([warp_resolution] * 3)))
+    wf.connect(make_meanvol, 'out_file',
+               align2template_nl, 'in_file')
+    wf.connect(fix_xfm, 'out_file',
+               align2template_nl, 'affine_file')
+    #wf.connect([(align2template_nl, subjsink, [
+    #    ('field_file', 'qa.task%.3i.subj2tasktmpl_warp.@out' % task),
+    #    ('warped_file', 'qa.task%.3i.subj2tasktmpl_nonlin.@out' % task),
+    #    ])])
+
+    # nonlin mask warping to the template
+    warpmask2template = pe.Node(
+        name='sub%.3i_warpmask2tmpl_nonlin_%s' % (subj, hash),
+        interface=fsl.ApplyWarp(
+            ref_file=brain_reference,
+            interp='nn'))
+    wf.connect(subj_bet, 'mask_file', warpmask2template, 'in_file')
+    wf.connect(align2template_nl, 'field_file', warpmask2template, 'field_file')
+
+    # nonlin data warping to the template
+    warp2template = pe.Node(
+        name='sub%.3i_warp2tmpl_nonlin_%s' % (subj, hash),
+        interface=fsl.ApplyWarp(
+            ref_file=brain_reference,
+            in_file=input,
+            interp='trilinear'))
+    wf.connect(align2template_nl, 'field_file', warp2template, 'field_file')
+    wf.connect(align2template_nl, 'field_file', sink, '%s_warp.@out' % basename)
+    wf.connect(warp2template, 'out_file', sink, '%s.@out' % basename)
+
+    return align2template_nl, warpmask2template
 
 
 def run(args):
@@ -140,28 +198,28 @@ def run(args):
     wf_name = "align2tmpl_%s_%s" % (label, dataset)
     wf = hlp.get_base_workflow(wf_name.replace('.', '_'), args)
 
-    input_exp = hlp.get_cfg_option(
-                    cfg_section,
-                    'input expression',
-                    cli_input=args.input_expression)
+    non_linear_flag = hlp.arg2bool(hlp.get_cfg_option(cfg_section, 'non-linear',
+                                   cli_input=args.non_linear))
+    input_exp = hlp.get_cfg_option(cfg_section, 'input expression',
+                                   cli_input=args.input_expression)
+    template = hlp.get_cfg_option(cfg_section, 'template',
+                                  cli_input=args.template)
 
-    template = hlp.get_cfg_option(
-                    cfg_section,
-                    'template',
-                    cli_input=args.template)
+    bet_padding=hlp.arg2bool(hlp.get_cfg_option(cfg_section, 'bet padding',
+                                                cli_input=args.bet_padding,
+                                                default=False))
+    bet_frac=float(hlp.get_cfg_option(cfg_section, 'bet frac',
+                                      cli_input=args.bet_frac, default=0.5))
 
-    bet_padding=hlp.arg2bool(
-                hlp.get_cfg_option(
-                    cfg_section,
-                    'bet padding',
-                    cli_input=args.bet_padding,
-                    default=False))
-    bet_frac=float(
-                hlp.get_cfg_option(
-                    cfg_section,
-                    'bet frac',
-                    cli_input=args.bet_frac,
-                    default=0.5))
+    search_radius=int(hlp.get_cfg_option(cfg_section, 'search radius',
+                                         cli_input=args.search_radius,
+                                         default=0))
+    warp_resolution=int(hlp.get_cfg_option(cfg_section, 'warp resolution',
+                                           cli_input=args.warp_resolution,
+                                           default=5))
+
+    zpad = int(hlp.get_cfg_option(cfg_section, 'zslice padding',
+                                  cli_input=args.zslice_padding, default=0))
 
     brain_reference = opj(dsdir, 'templates', template, 'brain.nii.gz')
     zpad_brain = pe.Node(
@@ -170,19 +228,18 @@ def run(args):
                 function=zslice_pad,
                 input_names=['in_file', 'nslices'],
                 output_names=['out_file']))
-    #zpad_brain.inputs.nslices = zpad
-    zpad_brain.inputs.nslices = 20
+    zpad_brain.inputs.nslices = zpad
     zpad_brain.inputs.in_file = brain_reference
 
-    lin_masks_ = []
-    lin_aligned_ = []
+    masks_ = []
+    aligned_ = []
     for subj in subjects:
         subj_sink = pe.Node(
                 interface=nio.DataSink(
                     parameterization=False,
                     base_directory=os.path.abspath(opj(dsdir, 'sub%.3i' % subj)),
                     regexp_substitutions=[
-                        ('/[^/]*\.nii', '_in_tmpl_%s.nii' % template),
+                        ('/[^/]*\.nii', '_aligned_%s.nii' % label),
                     ]),
                 name="sub%.3i_sink" % subj,
                 overwrite=True)
@@ -195,25 +252,30 @@ def run(args):
         if result.outputs is None:
             continue
 
-        subj_lin_aligned = pe.Node(
-                name='sub%.3i_lin_aligned' % subj,
+        subj_aligned = pe.Node(
+                name='sub%.3i_aligned' % subj,
                 interface=util.Merge(len(result.outputs.out_paths)))
         # do the same thing for each input file
-        for i, input in enumerate(result.outputs.out_paths):
-            lin_xfm, lin_mask = \
-                proc(label, template, zpad_brain, wf, subj, input, dsdir, bet_frac=bet_frac,
-                     bet_padding=bet_padding)
-            lin_masks_.append(lin_mask)
-            lin_aligned_.append(lin_xfm)
-            wf.connect(lin_xfm, 'out_file', subj_lin_aligned, 'in%i' % (i + 1))
+        for i, input in enumerate(sorted(result.outputs.out_paths)):
+            xfm, mask = \
+                proc(label, template, zpad_brain, wf, subj, input, dsdir,
+                     non_linear=non_linear_flag, bet_frac=bet_frac,
+                     bet_padding=bet_padding, search_radius=search_radius,
+                     warp_resolution=warp_resolution, zpad=zpad)
+            masks_.append(mask)
+            aligned_.append(xfm)
+            if non_linear_flag:
+                wf.connect(xfm, 'warped_file', subj_aligned, 'in%i' % (i + 1))
+            else:
+                wf.connect(xfm, 'out_file', subj_aligned, 'in%i' % (i + 1))
 
         # merge subj samples and store for QA
-        subj_merge_lin_aligned = pe.Node(
-                name='sub%.3i_merge_lin_aligned' % subj,
+        subj_merge_aligned = pe.Node(
+                name='sub%.3i_merge_aligned' % subj,
                 interface=fsl.Merge(dimension='t'))
-        wf.connect(subj_lin_aligned, 'out', subj_merge_lin_aligned, 'in_files')
-        wf.connect(subj_merge_lin_aligned, 'merged_file',
-                   subj_sink, 'qa.%s.lin_aligned_brain_samples.@out' % template)
+        wf.connect(subj_aligned, 'out', subj_merge_aligned, 'in_files')
+        wf.connect(subj_merge_aligned, 'merged_file',
+                   subj_sink, 'qa.%s.aligned_brain_samples.@out' % template)
     # store QA in template folder
     tmpl_sink = pe.Node(
             interface=nio.DataSink(
@@ -225,26 +287,29 @@ def run(args):
             name="tmpl_sink",
             overwrite=True)
     # merge all masks across all subj and store for QA
-    lin_masks = pe.Node(
-            name='lin_masks',
-            interface=util.Merge(len(lin_masks_)))
-    lin_aligned = lin_masks.clone(name='lin_aligned')
-    for i, mask in enumerate(lin_masks_):
-        wf.connect(mask, 'out_file', lin_masks, 'in%i' % (i + 1))
-    for i, aligned in enumerate(lin_aligned_):
-        wf.connect(aligned, 'out_file', lin_aligned, 'in%i' % (i + 1))
-    merge_lin_masks = pe.Node(
-                name='merge_lin_masks',
+    masks = pe.Node(
+            name='masks',
+            interface=util.Merge(len(masks_)))
+    aligned = masks.clone(name='aligned')
+    for i, mask in enumerate(masks_):
+        wf.connect(mask, 'out_file', masks, 'in%i' % (i + 1))
+    for i, a in enumerate(aligned_):
+        if non_linear_flag:
+            wf.connect(a, 'warped_file', aligned, 'in%i' % (i + 1))
+        else:
+            wf.connect(a, 'out_file', aligned, 'in%i' % (i + 1))
+    merge_masks = pe.Node(
+                name='merge_masks',
                 interface=fsl.Merge(dimension='t'))
-    merge_lin_aligned = merge_lin_masks.clone(name='merge_lin_aligned')
-    wf.connect(lin_masks, 'out', merge_lin_masks, 'in_files')
-    wf.connect(lin_aligned, 'out', merge_lin_aligned, 'in_files')
-    wf.connect(merge_lin_aligned, 'merged_file',
-               tmpl_sink, 'qa.%s.lin_aligned_brain_samples.@out' % label)
+    merge_aligned = merge_masks.clone(name='merge_aligned')
+    wf.connect(masks, 'out', merge_masks, 'in_files')
+    wf.connect(aligned, 'out', merge_aligned, 'in_files')
+    wf.connect(merge_aligned, 'merged_file',
+               tmpl_sink, 'qa.%s.aligned_brain_samples.@out' % label)
     mask_stats = pe.Node(
             name='mask_stats',
             interface=fsl.ImageMaths(op_string='-Tmean'))
-    wf.connect(merge_lin_masks, 'merged_file', mask_stats, 'in_file')
+    wf.connect(merge_masks, 'merged_file', mask_stats, 'in_file')
     wf.connect(mask_stats, 'out_file',
                tmpl_sink, 'qa.%s.brain_mask_stats.@out' % label)
     intersection_mask = pe.Node(
