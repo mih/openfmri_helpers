@@ -52,9 +52,12 @@ def setup_parser(parser):
         help="""For non-linear alignment""")
     parser.add_argument('--non-linear', type=hlp.arg2bool,
         help="""Perform an additional non-linear step for alignment""")
+    parser.add_argument('--motion-correction', type=hlp.arg2bool,
+        help="""Perform motion correction on input prior to alignment""")
 
 
 def proc(label, tmpl_label, template, wf, subj, input, dsdir,
+         motion_correction,
          non_linear=False, bet_frac=0.5, bet_padding=False, search_radius=0,
          warp_resolution=5, zpad=0):
     import hashlib
@@ -130,14 +133,30 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
     wf.connect(subj_bet, 'mask_file', mask2tmpl_lin, 'in_file')
     wf.connect(mask2tmpl_lin, 'out_file', sink, '%s_brainmask.@out' % basename)
 
+    # case of motion correcting input prior to alignment
+    if motion_correction:
+        mcflirt = pe.Node(
+            name='sub%.3i_mcflirt_%s' % (subj, hash),
+            interface=fsl.MCFLIRT(
+                save_plots=True,
+                stages=4,
+                interpolation='sinc'))
+        # use mean brain as MC target
+        wf.connect(make_meanvol, 'out_file', mcflirt, 'ref_file')
+        # write out MC estimates
+        wf.connect(mcflirt, 'par_file', sink, '%s_mcxfm.@out' % basename)
+
     if not non_linear:
         data2tmpl_lin = pe.Node(
                 name='sub%.3i_data2tmpl_lin_%s' % (subj, hash),
             interface=fsl.ApplyXfm(
                 interp='trilinear',
                 reference=brain_reference,
-                in_file=input,
                 apply_xfm=True))
+        if motion_correction:
+            wf.connect(mcflirt, 'out_file', data2tmpl_lin, 'in_file')
+        else:
+            data2tmpl_lin.inputs.in_file = input
         wf.connect(fix_xfm, 'out_file', data2tmpl_lin, 'in_matrix_file')
         wf.connect(fix_xfm, 'out_file', sink, '%s_xfm.@out' % basename)
         wf.connect(data2tmpl_lin, 'out_file', sink, '%s.@out' % basename)
@@ -174,8 +193,11 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
         name='sub%.3i_warp2tmpl_nonlin_%s' % (subj, hash),
         interface=fsl.ApplyWarp(
             ref_file=brain_reference,
-            in_file=input,
             interp='trilinear'))
+    if motion_correction:
+        wf.connect(mcflirt, 'out_file', warp2template, 'in_file')
+    else:
+        warp2template.inputs.in_file = input
     wf.connect(align2template_nl, 'field_file', warp2template, 'field_file')
     wf.connect(align2template_nl, 'field_file', sink, '%s_warp.@out' % basename)
     wf.connect(warp2template, 'out_file', sink, '%s.@out' % basename)
@@ -217,6 +239,9 @@ def run(args):
     warp_resolution=int(hlp.get_cfg_option(cfg_section, 'warp resolution',
                                            cli_input=args.warp_resolution,
                                            default=5))
+    motion_correction=hlp.arg2bool(hlp.get_cfg_option(cfg_section, 'motion correction',
+                                           cli_input=args.motion_correction,
+                                           default=False))
 
     zpad = int(hlp.get_cfg_option(cfg_section, 'zslice padding',
                                   cli_input=args.zslice_padding, default=0))
@@ -259,6 +284,7 @@ def run(args):
         for i, input in enumerate(sorted(result.outputs.out_paths)):
             xfm, mask = \
                 proc(label, template, zpad_brain, wf, subj, input, dsdir,
+                     motion_correction,
                      non_linear=non_linear_flag, bet_frac=bet_frac,
                      bet_padding=bet_padding, search_radius=search_radius,
                      warp_resolution=warp_resolution, zpad=zpad)
