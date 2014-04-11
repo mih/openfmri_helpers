@@ -1,0 +1,27 @@
+.. -*- mode: rst -*-
+
+.. _chap_changelog:
+
+.. index:: changelog
+
+*********************
+Development Changelog
+*********************
+
+Once a first complete draft of openfmri_helpers has been written, this
+changelog will only lists rather macroscopic changes to openfmri_helpers. The
+full VCS changelog is available here:
+
+  https://github.com/hanke/openfmri_helper/commits/master
+
+'Closes' and 'Fixes' statement IDs refer to the Debian and Github bug
+tracking systems accordingly and can be queried by visiting the URLs::
+
+  http://bugs.debian.org/<closed bug id>
+
+  https://github.com/hanke/openfmri_helper/issues/<fixed bug id>
+
+Releases
+========
+
+* (none yet)
