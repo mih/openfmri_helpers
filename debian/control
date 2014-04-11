@@ -1,0 +1,30 @@
+Source: openfmri-helpers
+Section: python
+Priority: extra
+Maintainer: NeuroDebian team <team@neuro.debian.net>
+Uploaders: Michael Hanke <mih@debian.org>, Yaroslav Halchenko <debian@onerussian.com>
+Build-Depends: debhelper (>= 9~),
+               python-dev (>= 2.6), python-support (>= 0.6),
+               help2man,
+Standards-Version: 3.9.5
+Homepage: https://github.com/hanke/openfmri_helpers
+X-Python-Version: >= 2.6
+
+
+Package: openfmri-helpers
+Architecture: all
+Depends: ${misc:Depends}, ${python:Depends},
+         python-numpy,
+         fsl-core,
+         afni,
+         python,
+         python-nibabel,
+         python-nipype,
+Suggests:
+         htcondor | condor,
+Provides: ${python:Provides}
+XB-Python-Version: ${python:Versions}
+Description: tools for working with (f)MRI dataset in openfmri.org layout
+ At this point in time two tools are provided that faciliate the generation of
+ group template images (T1, T2, or T2*) in an iterative multi-level procedure,
+ as well as the linear or non-linear alignment of data to such a template.
