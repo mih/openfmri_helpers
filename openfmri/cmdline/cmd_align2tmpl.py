@@ -73,6 +73,7 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
                 parameterization=False,
                 base_directory=os.path.abspath(os.path.dirname(input)),
                 regexp_substitutions=[
+                    ('/[^/]*\.par', '_%s.txt' % label),
                     ('/[^/]*\.nii', '_%s.nii' % label),
                     ('/[^/]*\.mat', '_%s.mat' % label),
                 ]),
@@ -140,11 +141,12 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             interface=fsl.MCFLIRT(
                 save_plots=True,
                 stages=4,
+                in_file=input,
                 interpolation='sinc'))
         # use mean brain as MC target
         wf.connect(make_meanvol, 'out_file', mcflirt, 'ref_file')
         # write out MC estimates
-        wf.connect(mcflirt, 'par_file', sink, '%s_mcxfm.@out' % basename)
+        wf.connect(mcflirt, 'par_file', sink, '%s_moco.@out' % basename)
 
     if not non_linear:
         data2tmpl_lin = pe.Node(
