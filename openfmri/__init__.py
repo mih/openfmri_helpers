@@ -10,7 +10,7 @@
 
 __docformat__ = "restructuredtext"
 
-__version__ = "0.0.0+dev"
+__version__ = "0.1"
 
 import os
 
