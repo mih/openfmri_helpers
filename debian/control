@@ -1,5 +1,5 @@
 Source: openfmri-helpers
-Section: python
+Section: contrib/python
 Priority: extra
 Maintainer: NeuroDebian team <team@neuro.debian.net>
 Uploaders: Michael Hanke <mih@debian.org>, Yaroslav Halchenko <debian@onerussian.com>
@@ -24,6 +24,7 @@ Suggests:
          htcondor | condor,
 Provides: ${python:Provides}
 XB-Python-Version: ${python:Versions}
+Section: contrib/science
 Description: tools for working with (f)MRI dataset in openfmri.org layout
  At this point in time two tools are provided that faciliate the generation of
  group template images (T1, T2, or T2*) in an iterative multi-level procedure,
