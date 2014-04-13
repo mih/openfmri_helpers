@@ -54,12 +54,14 @@ def setup_parser(parser):
         help="""Perform an additional non-linear step for alignment""")
     parser.add_argument('--motion-correction', type=hlp.arg2bool,
         help="""Perform motion correction on input prior to alignment""")
+    parser.add_argument('--use-qform', type=hlp.arg2bool,
+        help="""Whether to pass the -usesqform flag to FLIRT""")
 
 
 def proc(label, tmpl_label, template, wf, subj, input, dsdir,
          motion_correction,
          non_linear=False, bet_frac=0.5, bet_padding=False, search_radius=0,
-         warp_resolution=5, zpad=0):
+         warp_resolution=5, zpad=0, use_qform=True):
     import hashlib
 
     basename = os.path.basename(input)
@@ -102,7 +104,7 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             name='sub%.3i_align2tmpl_%s' % (subj, hash),
             interface=fsl.FLIRT(
                 cost='corratio',
-                uses_qform=True,
+                uses_qform=use_qform,
                 dof=12,
                 args="-interp trilinear"))
     if search_radius:
@@ -245,6 +247,10 @@ def run(args):
                                            cli_input=args.motion_correction,
                                            default=False))
 
+    use_qform=hlp.arg2bool(hlp.get_cfg_option(cfg_section, 'use qform',
+                                              cli_input=args.use_qform,
+                                              default=True))
+
     zpad = int(hlp.get_cfg_option(cfg_section, 'zslice padding',
                                   cli_input=args.zslice_padding, default=0))
 
@@ -289,7 +295,8 @@ def run(args):
                      motion_correction,
                      non_linear=non_linear_flag, bet_frac=bet_frac,
                      bet_padding=bet_padding, search_radius=search_radius,
-                     warp_resolution=warp_resolution, zpad=zpad)
+                     warp_resolution=warp_resolution, zpad=zpad,
+                     use_qform=use_qform)
             masks_.append(mask)
             aligned_.append(xfm)
             if non_linear_flag:
