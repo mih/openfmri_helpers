@@ -1,3 +1,10 @@
+openfmri-helpers (0.1-5-gc865642-1) UNRELEASED; urgency=low
+
+  * New snapshot.
+  * Install examples.
+
+ -- Michael Hanke <mih@debian.org>  Sat, 12 Apr 2014 10:04:42 +0200
+
 openfmri-helpers (0.1-1) UNRELEASED; urgency=low
 
   * Initial release.
