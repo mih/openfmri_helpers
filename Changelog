@@ -24,4 +24,12 @@ tracking systems accordingly and can be queried by visiting the URLs::
 Releases
 ========
 
-* (none yet)
+* coming
+
+  - New --use-qform flag to ignore bogus image transforms.
+  - Example configuration file.
+
+* 0.1 (Sat, Apr 12 2014)
+
+  - Initial release
+
