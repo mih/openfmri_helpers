@@ -71,6 +71,8 @@ def setup_parser(parser):
         choices=('none', 'global_linear', 'global_non_linear', 'local_linear',
                  'global_non_linear_with_bias', 'local_non_linear'),
         help="""Intensity mapping model for FNIRT""")
+    parser.add_argument('--use-qform', type=hlp.arg2bool,
+        help="""Whether to pass the -usesqform flag to FLIRT""")
 
 import sys
 import os                                    # system functions
@@ -196,14 +198,14 @@ def make_subj_preproc_branch(label, wf, subj, datadir, datasrc,
     return subj_bet, make_subj_tmpl
 
 def align_subj_to_tmpl_lin(wf, subj, lvl, brain_tmpl, head_tmpl, brain, head,
-                       last_linear_align):
+                       last_linear_align, use_qform=True):
     align_brain_to_template = pe.Node(
             name='sub%.3i_align_brain_to_template_lvl%i' % (subj, lvl),
             interface=fsl.FLIRT(
                 #no_search=True,
                 #cost='normmi',
                 #cost_func='normmi',
-                uses_qform=True,
+                uses_qform=use_qform,
                 searchr_x=[-90, 90],
                 searchr_y=[-90, 90],
                 searchr_z=[-90, 90],
@@ -457,7 +459,8 @@ def get_epi_tmpl_workflow(wf, datasrcs,
                           subj_bet_frac=0.5,
                           tmpl_bet_frac=0.5,
                           tmpl_bet_gradient=0,
-                          intmod='global_non_linear_with_bias'
+                          intmod='global_non_linear_with_bias',
+                          use_qform=True
                           ):
     # data sink
     datasink = pe.Node(
@@ -509,7 +512,8 @@ def get_epi_tmpl_workflow(wf, datasrcs,
                     brain, head = align_subj_to_tmpl_lin(
                         wf, subj, lvl,
                         latest_brain_tmpl, latest_head_tmpl,
-                        brain, head, last_linear_align[subj])
+                        brain, head, last_linear_align[subj],
+                        use_qform=use_qform)
                     last_linear_align[subj] = brain
                 else:
                     # non-linear alignment
@@ -648,7 +652,13 @@ def run(args):
                             cfg_section,
                             'nonlin intensity mapping',
                             cli_input=args.nonlin_mapping_model,
-                            default='global_non_linear_with_bias')
+                            default='global_non_linear_with_bias'),
+            use_qform=hlp.arg2bool(
+                        hlp.get_cfg_option(
+                            cfg_section,
+                            'use qform',
+                            cli_input=args.use_qform,
+                            default=True)),
             )
 
     return wf
