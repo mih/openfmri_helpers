@@ -134,7 +134,8 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             apply_xfm=True))
     wf.connect(fix_xfm, 'out_file', mask2tmpl_lin, 'in_matrix_file')
     wf.connect(subj_bet, 'mask_file', mask2tmpl_lin, 'in_file')
-    wf.connect(mask2tmpl_lin, 'out_file', sink, '%s_brainmask.@out' % basename)
+    if not non_linear:
+        wf.connect(mask2tmpl_lin, 'out_file', sink, '%s_brainmask.@out' % basename)
 
     # case of motion correcting input prior to alignment
     if motion_correction:
@@ -191,6 +192,7 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             interp='nn'))
     wf.connect(subj_bet, 'mask_file', warpmask2template, 'in_file')
     wf.connect(align2template_nl, 'field_file', warpmask2template, 'field_file')
+    wf.connect(warpmask2template, 'out_file', sink, '%s_brainmask.@out' % basename)
 
     # nonlin data warping to the template
     warp2template = pe.Node(
