@@ -73,6 +73,11 @@ def setup_parser(parser):
         help="""Intensity mapping model for FNIRT""")
     parser.add_argument('--use-qform', type=hlp.arg2bool,
         help="""Whether to pass the -usesqform flag to FLIRT""")
+    parser.add_argument('--initial-reference-brain', metavar='FILE',
+        help="""Skull-stripped brain volume to use as an initial alignment.
+        If not specified, one of the input images is used as a reference
+        (the one with the smallest absolute difference from the mean of all
+        input images).""")
 
 import sys
 import os                                    # system functions
@@ -460,7 +465,8 @@ def get_epi_tmpl_workflow(wf, datasrcs,
                           tmpl_bet_frac=0.5,
                           tmpl_bet_gradient=0,
                           intmod='global_non_linear_with_bias',
-                          use_qform=True
+                          use_qform=True,
+                          init_template=None
                           ):
     # data sink
     datasink = pe.Node(
@@ -488,8 +494,19 @@ def get_epi_tmpl_workflow(wf, datasrcs,
                 name='lvl%i_subjs_heads' % lvl,
                 interface=util.Merge(len(subjects)))
         if lvl == 0:
+            if init_template is None:
+                b, h = (brains, heads)
+            else:
+                if not os.path.isabs(init_template):
+                    init_template = opj(datadir, init_template)
+                b = pe.Node(
+                        name='lvl0_init_templ_brain',
+                        interface=util.IdentityInterface(
+                            fields=['out']))
+                b.inputs.out = [init_template]
+                h = b.clone('lvl0_init_templ_head')
             brain_tmpl, head_tmpl = make_init_template(wf, datasink, lvl,
-                                                       brains, heads,
+                                                       b, h,
                                                        target_resolution, zpad)
         else:
             brain_tmpl, head_tmpl = make_avg_template(
@@ -659,6 +676,11 @@ def run(args):
                             'use qform',
                             cli_input=args.use_qform,
                             default=True)),
+            init_template=hlp.get_cfg_option(
+                            cfg_section,
+                            'initial reference brain',
+                            cli_input=args.initial_reference_brain,
+                            default=None),
             )
 
     return wf
