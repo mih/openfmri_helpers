@@ -173,6 +173,7 @@ def get_base_workflow(name, args):
     import nipype.pipeline.engine as pe
     wdir = get_path_cfg('common', 'work directory',
                         cli_input=args.workdir,
+                        default=opj(os.path.curdir, 'pipe_tmp'),
                         ensure_exists=True,
                         create_dir=True)
 
