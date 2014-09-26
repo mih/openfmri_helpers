@@ -61,7 +61,9 @@ src_label = (
 
 label = (
     'label', ('--label',),
-    dict(help="""Base name of the respective output data file(s)""")
+    dict(help="""identifiers for command specific configuration sections;
+         sometimes also used as base name of the respective output data
+         file(s)""")
 )
 
 subjects = (
