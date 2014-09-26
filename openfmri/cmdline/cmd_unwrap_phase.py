@@ -32,13 +32,13 @@ parser_args = dict(formatter_class=argparse.RawDescriptionHelpFormatter)
 
 def setup_parser(parser):
     hlp.parser_add_common_args(parser, required=True,
-        opt=('datadir', 'dataset', 'label'))
+        opt=('label',))
     hlp.parser_add_common_opt(parser, 'input_expression',
             names=('--magnitude-img-expression',))
     hlp.parser_add_common_opt(parser, 'input_expression',
             names=('--phase-img-expression',))
     hlp.parser_add_common_args(parser,
-        opt=('subjects', 'workdir'))
+        opt=('datadir', 'dataset', 'subjects', 'workdir'))
 
 import sys
 import os                                    # system functions
@@ -56,7 +56,6 @@ def run(args):
 
     subjects = hlp.get_dataset_subj_ids(args)
     subjects = hlp.exclude_subjects(subjects, cfg_section)
-    print subjects
 
     dsdir = hlp.get_dataset_dir(args)
 
@@ -76,7 +75,6 @@ def run(args):
                     expr % dict(subj='sub%.3i' % subj))
                         for itype, expr in (('mag', mag_exp), ('pha', pha_exp))]
                ) for subj in subjects])
-    print filesrcs
     wf = get_unwrap_workflow(wf, filesrcs, subjects, label, dsdir)
 
     return wf
@@ -92,7 +90,6 @@ def get_unwrap_workflow(wf, datasrcs, subjects, label, datadir):
             # want to put each file into the folder the phase image came
             # from -- no other idea than to use a sink per file
             magfile, phafile = files
-            print files
             sink_dir = os.path.dirname(phafile[len(datadir) + 1:])
             if not sink_dir in sinks:
                 file_sink = pe.Node(
