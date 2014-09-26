@@ -77,3 +77,12 @@ zslice_padding = (
         of the template image. This can aid alignment of images with small
         FOV in z-direction.""")
 )
+
+input_expression = (
+    'input-expression', ('--input-expression',),
+    dict(type=str,
+         help="""Expression to select input data from a dataset. Use the placeholder
+         '%%(subj)s' to automatically expand the expression to match data from selected
+         individual subjects. Note that when specified in a configuration file the
+         '%%' needs to be escaped as '%%%%'.""")
+)

@@ -35,11 +35,9 @@ from ..nipype_helpers import *
 
 def setup_parser(parser):
     hlp.parser_add_common_args(parser,
-        opt=('datadir', 'dataset', 'subjects', 'workdir', 'zslice_padding'))
+        opt=('datadir', 'dataset', 'subjects', 'workdir', 'input_expression', 'zslice_padding'))
     hlp.parser_add_common_args(parser, required=True,
         opt=('label',))
-    parser.add_argument('--input-expression',
-        help="""For the data input""")
     parser.add_argument('--template',
         help="""Reference template label""")
     parser.add_argument('--bet-padding', type=hlp.arg2bool,

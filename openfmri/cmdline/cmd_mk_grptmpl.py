@@ -29,7 +29,7 @@ parser_args = dict(formatter_class=argparse.RawDescriptionHelpFormatter)
 
 def setup_parser(parser):
     hlp.parser_add_common_args(parser,
-        opt=('datadir', 'dataset', 'subjects', 'workdir', 'zslice_padding'))
+        opt=('datadir', 'dataset', 'subjects', 'workdir', 'input_expression', 'zslice_padding'))
     hlp.parser_add_common_args(parser, required=True,
         opt=('label',))
     parser.add_argument(
@@ -54,8 +54,6 @@ def setup_parser(parser):
         the estimated transformation into MNI space, i.e. mm-cordinates
         will be actual MNI coordinates. CAUTION: the current implementation
         only works properly for radiological images! (hence OFF by default)""")
-    parser.add_argument('--input-expression',
-        help="""For the data input""")
     parser.add_argument('--final-skullstrip', type=hlp.arg2bool,
         help="""If true, the final brain-extracted template image is created
         by a final skull-stripping of the head template image.""")
