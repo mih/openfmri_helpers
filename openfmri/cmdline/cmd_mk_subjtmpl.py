@@ -120,24 +120,32 @@ def make_init_template(wf, subj, datasink, heads, target_resolution, zpad=0):
 def make_subj_preproc_branch(wf, subj, datasrc, use_4d_mean=False):
     # normalize all input images
     normalize_vols = pe.MapNode(
-            name='sub%.3i_normalize_samplevols' % subj,
+            name='sub%.3i_normalize_samplevols' % (subj,),
             interface=fsl.ImageMaths(op_string='-inm 1000'),
             iterfield=['in_file'])
+    # we need to make zero again what was zero before
+    zeroagain = pe.MapNode(
+            name='sub%.3i_threshold_samplevols' % (subj,),
+            interface=fsl.ApplyMask(),
+            iterfield=['in_file', 'mask_file'])
+    wf.connect(normalize_vols, 'out_file', zeroagain, 'in_file')
 
     if use_4d_mean:
         make_samplevols = pe.MapNode(
-                name='sub%.3i_make_samplevol' % subj,
+                name='sub%.3i_make_samplevol' % (subj,),
                 interface=fsl.ImageMaths(op_string='-Tmean'),
                 iterfield=['in_file'])
         wf.connect(make_samplevols, 'out_file', normalize_vols, 'in_file')
+        wf.connect(make_samplevols, 'out_file', zeroagain, 'mask_file')
     else:
         make_samplevols = pe.MapNode(
-                name='sub%.3i_make_samplevol' % subj,
+                name='sub%.3i_make_samplevol' % (subj,),
                 interface=fsl.ExtractROI(t_min=0, t_size=1),
                 iterfield=['in_file'])
         wf.connect(make_samplevols, 'roi_file', normalize_vols, 'in_file')
+        wf.connect(make_samplevols, 'roi_file', zeroagain, 'mask_file')
     wf.connect(datasrc, 'out_paths', make_samplevols, 'in_file')
-    return normalize_vols
+    return zeroagain
 
 def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink):
     if hasattr(tmpl.outputs, 'out_file'):
@@ -154,10 +162,20 @@ def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink):
     align_samplevols = pe.Node(
             name='sub%.3i_lvl%i_align_samplevols' % (subj, lvl),
             interface=fsl.MCFLIRT(
+                interpolation='sinc',
                 stages=4))
     wf.connect(tmpl, oslot, align_samplevols, 'ref_file')
     wf.connect(merge_samplevols, 'merged_file', align_samplevols, 'in_file')
-    wf.connect(align_samplevols, 'out_file',
+    # MCFlirt introduced strange values on the edges if blank space or padded
+    # slices, to aggressive threshold of the result
+    zeroagain = pe.Node(
+            name='sub%.3i_lvl%i_threshold_samplevols' % (subj, lvl),
+            interface=fsl.Threshold(
+                thresh=1,
+                use_nonzero_voxels=True,
+                use_robust_range=True))
+    wf.connect(align_samplevols, 'out_file', zeroagain, 'in_file')
+    wf.connect(zeroagain, 'out_file',
                sink, 'qa.lvl%i.aligned_head_samples.@out' % (lvl,))
     # merge all aligned volumes into a normalized subject template
     make_subj_tmpl = pe.Node(
@@ -166,7 +184,7 @@ def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink):
                 function=nonzero_avg,
                 input_names=['in_file'],
                 output_names=['out_file', 'avg_stats']))
-    wf.connect(align_samplevols, 'out_file', make_subj_tmpl, 'in_file')
+    wf.connect(zeroagain, 'out_file', make_subj_tmpl, 'in_file')
     wf.connect(make_subj_tmpl, 'out_file',
                sink, 'qa.lvl%i.head.@out' % (lvl,))
     wf.connect(make_subj_tmpl, 'avg_stats',
