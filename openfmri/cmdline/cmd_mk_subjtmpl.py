@@ -173,11 +173,11 @@ def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink):
                sink, 'qa.lvl%i.head_avgstats.@out' % (lvl,))
     return make_subj_tmpl
 
-def trim_tmpl(wf, tmpl, name, roi):
+def trim_tmpl(wf, subj, tmpl, name, roi):
     # trim the template
     x_min, x_size, y_min, y_size, z_min, z_size = roi
     trim_template = pe.Node(
-            name='trim_%s' % name,
+            name='sub%.3i_trim_%s' % (subj, name),
             interface=fsl.ExtractROI(
                 x_min=x_min, x_size=x_size,
                 y_min=y_min, y_size=y_size,
@@ -219,7 +219,7 @@ def get_epi_tmpl_workflow(wf, datasrc, datasink,
         tmpl = make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, datasink)
 
     if not template_roi is None:
-        tmpl = trim_tmpl(wf, tmpl, 'tmpl', roi=template_roi)
+        tmpl = trim_tmpl(wf, subj, tmpl, 'tmpl', roi=template_roi)
         out_slot = 'roi_file'
     else:
         out_slot = 'out_file'
