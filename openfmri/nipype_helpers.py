@@ -63,16 +63,15 @@ def nonzero_avg(in_file):
     in_img = nb.load(in_file)
     in_data = in_img.get_data()
     avg_data = np.zeros(in_data.shape[:3], dtype=np.float)
-    avg_count = np.ones(in_data.shape[:3], dtype=np.int16)
+    avg_count = np.zeros(in_data.shape[:3], dtype=np.int)
     if len(in_data.shape) > 3:
         for i, vol in enumerate(np.rollaxis(in_data, 3, 0)):
             avg_data += vol
-            if i > 0:
-                # it already starts with all ones
-                avg_count += vol > 0
+            avg_count += vol > 0
     else:
         avg_data = in_data
-    avg_data /= avg_count
+    nonzero = avg_count > 0
+    avg_data[nonzero] /= avg_count[nonzero]
     nb.save(nb.Nifti1Image(avg_data, in_img.get_affine()),
             'avg.nii.gz')
     nb.save(nb.Nifti1Image(avg_count, in_img.get_affine()),
