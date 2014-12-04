@@ -29,8 +29,12 @@ def pick_closest_to_avg(in_files, in_aux):
     avg_data = nb.load(avg).get_data()
     dists = [np.sum((avg_data - nb.load(vol).get_data())**2) for vol in in_files]
     min_idx = np.argmin(dists)
-    return os.path.abspath(in_files[min_idx]), \
-           os.path.abspath(in_aux[min_idx])
+    if len(in_aux) == len(in_files):
+        return os.path.abspath(in_files[min_idx]), \
+               os.path.abspath(in_aux[min_idx])
+    else:
+        return os.path.abspath(in_files[min_idx]), None
+
 
 def zslice_pad(in_file, nslices):
     import os
