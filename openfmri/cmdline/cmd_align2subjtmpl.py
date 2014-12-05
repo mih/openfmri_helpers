@@ -128,6 +128,7 @@ def run(args):
             align4d = pe.Node(
                     name='sub%.3i_%i_align4d_%s' % (subj, i, hash),
                     interface=fsl.MCFLIRT(
+                        cost='corratio',
                         ref_file=reference,
                         stages=4))
             align4d.inputs.in_file = input
