@@ -168,8 +168,7 @@ def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink, fgthresh):
     zeroagain = pe.Node(
             name='sub%.3i_lvl%i_threshold_samplevols' % (subj, lvl),
             interface=fsl.maths.MathsCommand(
-                args=' -thrP %.f ' % (fgthresh,),
-                output_datatype='char'))
+                args=' -thrP %.f ' % (fgthresh,),))
     wf.connect(align_samplevols, 'out_file', zeroagain, 'in_file')
     wf.connect(zeroagain, 'out_file',
                sink, 'qa.lvl%i.aligned_head_samples.@out' % (lvl,))
