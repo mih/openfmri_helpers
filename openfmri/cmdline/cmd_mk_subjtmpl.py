@@ -64,10 +64,10 @@ def setup_parser(parser):
         volume is used.""")
     parser.add_argument('--fgthresh', type=float,
         help="""Threshold for foreground voxels in percent of the
-        robust range. This threshold is used to determine a foreground
-        mask for each aligned volume. The average of these foreground masks
-        across all input samples is available as QA output. This parameter
-        has no influence on the actual alignment.""")
+        robust range of the nonzero voxels. This threshold is used to determine
+        a foreground mask for each aligned volume. The average of these
+        foreground masks across all input samples is available as QA output.
+        This parameter has no influence on the actual alignment.""")
 
 import sys
 import os                                    # system functions
@@ -167,10 +167,9 @@ def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink, fgthresh):
     # slices, to aggressive threshold of the result
     zeroagain = pe.Node(
             name='sub%.3i_lvl%i_threshold_samplevols' % (subj, lvl),
-            interface=fsl.Threshold(
-                thresh=fgthresh,
-                use_nonzero_voxels=False,
-                use_robust_range=True))
+            interface=fsl.maths.MathsCommand(
+                args=' -thrP %.f ' % (fgthresh,),
+                output_datatype='char'))
     wf.connect(align_samplevols, 'out_file', zeroagain, 'in_file')
     wf.connect(zeroagain, 'out_file',
                sink, 'qa.lvl%i.aligned_head_samples.@out' % (lvl,))
@@ -299,56 +298,64 @@ def run(args):
             ]),
             name="subj%.3i_datasink" % subj,
             overwrite=True)) for subj in subjects])
+    lin=int(hlp.get_cfg_option(cfg_section,
+                               'linear iterations',
+                               cli_input=args.linear,
+                               default=1))
+    zpad=int(hlp.get_cfg_option(cfg_section,
+                                'zslice padding',
+                                cli_input=args.zslice_padding,
+                                default=0))
+    bet_padding=hlp.arg2bool(
+                hlp.get_cfg_option(
+                    cfg_section,
+                    'bet padding',
+                    cli_input=args.bet_padding,
+                    default=False))
+    tmpl_bet_frac=float(
+                hlp.get_cfg_option(
+                    cfg_section,
+                    'template bet frac',
+                    cli_input=args.tmpl_bet_frac,
+                    default=0.5))
+    tmpl_bet_gradient=float(
+                hlp.get_cfg_option(
+                    cfg_section,
+                    'template bet gradient',
+                    cli_input=args.tmpl_bet_gradient,
+                    default=0))
+    init_template=hlp.get_cfg_option(
+                    cfg_section,
+                    'initial reference brain',
+                    cli_input=args.initial_reference_brain,
+                    default=None)
+    use_4d_mean=hlp.arg2bool(
+                hlp.get_cfg_option(
+                    cfg_section,
+                    'use 4d mean',
+                    cli_input=args.use_4d_mean,
+                    default=False))
+    fgthresh = float(
+                hlp.get_cfg_option(
+                    cfg_section,
+                    'foreground threshold',
+                    cli_input=args.fgthresh,
+                    default=1.0))
 
     for subj in subjects:
         wf = get_epi_tmpl_workflow(wf, datasrcs[subj], datasinks[subj], subj,
                 label,
                 target_res,
                 dsdir,
-                lin=int(hlp.get_cfg_option(cfg_section,
-                                           'linear iterations',
-                                           cli_input=args.linear,
-                                           default=1)),
-                zpad=int(hlp.get_cfg_option(cfg_section,
-                                            'zslice padding',
-                                            cli_input=args.zslice_padding,
-                                            default=0)),
+                lin=lin,
+                zpad=zpad,
                 template_roi=roi,
-                bet_padding=hlp.arg2bool(
-                            hlp.get_cfg_option(
-                                cfg_section,
-                                'bet padding',
-                                cli_input=args.bet_padding,
-                                default=False)),
-                tmpl_bet_frac=float(
-                            hlp.get_cfg_option(
-                                cfg_section,
-                                'template bet frac',
-                                cli_input=args.tmpl_bet_frac,
-                                default=0.5)),
-                tmpl_bet_gradient=float(
-                            hlp.get_cfg_option(
-                                cfg_section,
-                                'template bet gradient',
-                                cli_input=args.tmpl_bet_gradient,
-                                default=0)),
-                init_template=hlp.get_cfg_option(
-                                cfg_section,
-                                'initial reference brain',
-                                cli_input=args.initial_reference_brain,
-                                default=None),
-                use_4d_mean=hlp.arg2bool(
-                            hlp.get_cfg_option(
-                                cfg_section,
-                                'use 4d mean',
-                                cli_input=args.use_4d_mean,
-                                default=False)),
-                fgthresh = float(
-                            hlp.get_cfg_option(
-                                cfg_section,
-                                'foreground threshold',
-                                cli_input=args.fgthresh,
-                                default=5.0)),
+                bet_padding=bet_padding,
+                tmpl_bet_frac=tmpl_bet_frac,
+                tmpl_bet_gradient=tmpl_bet_gradient,
+                init_template=init_template,
+                use_4d_mean=use_4d_mean,
+                fgthresh=fgthresh,
                 )
 
     return wf
