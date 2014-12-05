@@ -62,6 +62,12 @@ def setup_parser(parser):
         help="""If enabled, 4D input images are "compressed" into their
         mean volume, which is then used for alignment. Otherwise the first
         volume is used.""")
+    parser.add_argument('--fgthresh', type=float,
+        help="""Threshold for foreground voxels in percent of the
+        robust range. This threshold is used to determine a foreground
+        mask for each aligned volume. The average of these foreground masks
+        across all input samples is available as QA output. This parameter
+        has no influence on the actual alignment.""")
 
 import sys
 import os                                    # system functions
@@ -123,31 +129,22 @@ def make_subj_preproc_branch(wf, subj, datasrc, use_4d_mean=False):
             name='sub%.3i_normalize_samplevols' % (subj,),
             interface=fsl.ImageMaths(op_string='-inm 1000'),
             iterfield=['in_file'])
-    # we need to make zero again what was zero before
-    zeroagain = pe.MapNode(
-            name='sub%.3i_threshold_samplevols' % (subj,),
-            interface=fsl.ApplyMask(),
-            iterfield=['in_file', 'mask_file'])
-    wf.connect(normalize_vols, 'out_file', zeroagain, 'in_file')
-
     if use_4d_mean:
         make_samplevols = pe.MapNode(
                 name='sub%.3i_make_samplevol' % (subj,),
                 interface=fsl.ImageMaths(op_string='-Tmean'),
                 iterfield=['in_file'])
         wf.connect(make_samplevols, 'out_file', normalize_vols, 'in_file')
-        wf.connect(make_samplevols, 'out_file', zeroagain, 'mask_file')
     else:
         make_samplevols = pe.MapNode(
                 name='sub%.3i_make_samplevol' % (subj,),
                 interface=fsl.ExtractROI(t_min=0, t_size=1),
                 iterfield=['in_file'])
         wf.connect(make_samplevols, 'roi_file', normalize_vols, 'in_file')
-        wf.connect(make_samplevols, 'roi_file', zeroagain, 'mask_file')
     wf.connect(datasrc, 'out_paths', make_samplevols, 'in_file')
-    return zeroagain
+    return normalize_vols
 
-def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink):
+def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink, fgthresh):
     if hasattr(tmpl.outputs, 'out_file'):
         oslot = 'out_file'
     else:
@@ -171,8 +168,8 @@ def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink):
     zeroagain = pe.Node(
             name='sub%.3i_lvl%i_threshold_samplevols' % (subj, lvl),
             interface=fsl.Threshold(
-                thresh=1,
-                use_nonzero_voxels=True,
+                thresh=fgthresh,
+                use_nonzero_voxels=False,
                 use_robust_range=True))
     wf.connect(align_samplevols, 'out_file', zeroagain, 'in_file')
     wf.connect(zeroagain, 'out_file',
@@ -206,9 +203,9 @@ def trim_tmpl(wf, subj, tmpl, name, roi):
 def final_bet(wf, subj, head_tmpl, slot_name, padding=False, frac=0.5,
               gradient=0):
     if padding:
-        interface=fsl.BET(padding=True, frac=frac, vertical_gradient=gradient)
+        interface=fsl.BET(mask=True, padding=True, frac=frac, vertical_gradient=gradient)
     else:
-        interface=fsl.BET(robust=True, frac=frac, vertical_gradient=gradient)
+        interface=fsl.BET(mask=True, robust=True, frac=frac, vertical_gradient=gradient)
     bet = pe.Node(name='sub%.3i_final_bet' % (subj,), interface=interface)
     wf.connect(head_tmpl, slot_name, bet, 'in_file')
     return bet
@@ -227,6 +224,7 @@ def get_epi_tmpl_workflow(wf, datasrc, datasink,
                           tmpl_bet_gradient=0,
                           init_template=None,
                           use_4d_mean=False,
+                          fgthresh=5.0,
                           ):
     # extract sample volumes and normalize them
     vols = make_subj_preproc_branch(wf, subj, datasrc, use_4d_mean=use_4d_mean)
@@ -234,7 +232,7 @@ def get_epi_tmpl_workflow(wf, datasrc, datasink,
     tmpl = make_init_template(wf, subj, datasink, vols, target_resolution, zpad=zpad)
 
     for lvl in range(lin + 1):
-        tmpl = make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, datasink)
+        tmpl = make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, datasink, fgthresh)
 
     if not template_roi is None:
         tmpl = trim_tmpl(wf, subj, tmpl, 'tmpl', roi=template_roi)
@@ -245,6 +243,7 @@ def get_epi_tmpl_workflow(wf, datasrc, datasink,
                      bet_padding, tmpl_bet_frac,
                      tmpl_bet_gradient)
     wf.connect(bet_tmpl, 'out_file', datasink, 'brain.@out')
+    wf.connect(bet_tmpl, 'mask_file', datasink, 'brain_mask.@out')
     wf.connect(tmpl, out_slot, datasink, 'head.@out')
 
     return wf
@@ -344,6 +343,12 @@ def run(args):
                                 'use 4d mean',
                                 cli_input=args.use_4d_mean,
                                 default=False)),
+                fgthresh = float(
+                            hlp.get_cfg_option(
+                                cfg_section,
+                                'foreground threshold',
+                                cli_input=args.fgthresh,
+                                default=5.0)),
                 )
 
     return wf
