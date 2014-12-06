@@ -211,3 +211,19 @@ def fix_xfm_after_zpad(xfm, reference, nslices):
     xfm_mat[2,3] -= nslices * zpixdim
     np.savetxt('fixed.mat', xfm_mat)
     return os.path.abspath('fixed.mat')
+
+def tsnr_from_filename(in_file):
+    import nibabel as nb
+    import numpy as np
+    import os
+
+    outname = 'tsnr.nii.gz'
+
+    img = nb.load(in_file)
+    data = img.get_data()
+    mean_d = np.mean(data,axis=-1)
+    std_d = np.std(data,axis=-1)
+    tsnr = np.ma.array(mean_d, mask=std_d == 0) / std_d
+    nb.save(nb.Nifti1Image(tsnr, img.get_affine()), outname)
+
+    return os.path.abspath(outname)

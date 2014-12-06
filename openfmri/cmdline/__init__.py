@@ -15,3 +15,4 @@ import cmd_mk_subjtmpl
 import cmd_align2tmpl
 import cmd_align2subjtmpl
 import cmd_unwrap_phase
+import cmd_comp_tsnr
