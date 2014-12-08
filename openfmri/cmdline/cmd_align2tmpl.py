@@ -309,16 +309,6 @@ def run(args):
     masks_ = []
     aligned_ = []
     for subj in subjects:
-        subj_sink = pe.Node(
-                interface=nio.DataSink(
-                    parameterization=False,
-                    base_directory=os.path.abspath(opj(dsdir, 'sub%.3i' % subj)),
-                    regexp_substitutions=[
-                        ('/[^/]*\.nii', '_aligned_%s.nii' % label),
-                    ]),
-                name="sub%.3i_sink" % subj,
-                overwrite=True)
-
         expr = input_exp % dict(subj='sub%.3i' % subj)
 
         df = nio.DataFinder(root_paths=dsdir, match_regex=expr,
@@ -346,13 +336,6 @@ def run(args):
             else:
                 wf.connect(xfm, 'out_file', subj_aligned, 'in%i' % (i + 1))
 
-        # merge subj samples and store for QA
-        subj_merge_aligned = pe.Node(
-                name='sub%.3i_merge_aligned' % subj,
-                interface=fsl.Merge(dimension='t'))
-        wf.connect(subj_aligned, 'out', subj_merge_aligned, 'in_files')
-        wf.connect(subj_merge_aligned, 'merged_file',
-                   subj_sink, 'qa.%s.aligned_brain_samples.@out' % template)
     # store QA in template folder
     tmpl_sink = pe.Node(
             interface=nio.DataSink(
