@@ -130,9 +130,11 @@ def run(args):
                     interface=fsl.MCFLIRT(
                         cost='corratio',
                         ref_file=reference,
+                        save_plots=True,
                         stages=4))
             align4d.inputs.in_file = input
             wf.connect(align4d, 'out_file', sink, '%s.@out' % basename)
+            wf.connect(align4d, 'par_file', sink, 'qa.%s_moest.@out' % basename)
             # a bit of QA: compute a mask indicating voxels that are
             # non-background for the entire during of the timeseries
             # non-background is defined as less the X% of the robust range
