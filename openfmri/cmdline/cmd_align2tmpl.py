@@ -54,50 +54,71 @@ def setup_parser(parser):
         help="""Perform motion correction on input prior to alignment""")
     parser.add_argument('--use-qform', type=hlp.arg2bool,
         help="""Whether to pass the -usesqform flag to FLIRT""")
+    parser.add_argument('--input-subjtmpl', type=hlp.arg2bool,
+        help="""Whether to treat the input as a subject template's head image.
+        This will cause the algorithm to re-use existing brain masks and output
+        results into a template-like directory structure.""")
 
 
 def proc(label, tmpl_label, template, wf, subj, input, dsdir,
          motion_correction,
          non_linear=False, bet_frac=0.5, bet_padding=False, search_radius=0,
-         warp_resolution=5, zpad=0, use_qform=True):
+         warp_resolution=5, zpad=0, use_qform=True, input_subjtmpl=False):
     import hashlib
 
+    inputdir = os.path.dirname(input)
     basename = os.path.basename(input)
     basename = basename[:basename.index('.')]
     brain_reference = opj(dsdir, 'templates', tmpl_label, 'brain.nii.gz')
     head_reference = opj(dsdir, 'templates', tmpl_label, 'head.nii.gz')
+
+    # where does the output go?
+    if input_subjtmpl:
+        sinkslot_data = 'in_%s.head.@out' % (tmpl_label,)
+        sinkslot_brainmask = 'in_%s.brain_mask.@out' % (tmpl_label,)
+        sinkslot_affine = 'in_%s.subj2tmpl_12dof.@out' % (tmpl_label,)
+        sinkslot_warpfield = 'in_%s.subj2tmpl_warp.@out' % (tmpl_label,)
+        sink_regexp_substitutions=[
+                    ('/[^/]*\.par', '.txt'),
+                    ('/[^/]*\.nii', '.nii'),
+                    ('/[^/]*\.mat', '.mat')]
+    else:
+        sinkslot_brainmask = '%s_brainmask.@out' % basename
+        sinkslot_affine = '%s_xfm.@out' % basename
+        sinkslot_data = '%s.@out' % basename
+        sinkslot_warpfield = '%s_warp.@out' % basename
+        sink_regexp_substitutions=[
+                    ('/[^/]*\.par', '_%s.txt' % label),
+                    ('/[^/]*\.nii', '_%s.nii' % label),
+                    ('/[^/]*\.mat', '_%s.mat' % label)]
 
     hash = hashlib.md5(input).hexdigest()
     sink = pe.Node(
             interface=nio.DataSink(
                 parameterization=False,
                 base_directory=os.path.abspath(os.path.dirname(input)),
-                regexp_substitutions=[
-                    ('/[^/]*\.par', '_%s.txt' % label),
-                    ('/[^/]*\.nii', '_%s.nii' % label),
-                    ('/[^/]*\.mat', '_%s.mat' % label),
-                ]),
+                regexp_substitutions=sink_regexp_substitutions),
             name="sub%.3i_sink_%s" % (subj, hash),
             overwrite=True)
 
-    # mean vol for each input
-    make_meanvol = pe.Node(
-            name='sub%.3i_meanvol_%s' % (subj, hash),
-            interface=fsl.ImageMaths(op_string='-Tmean'))
-    make_meanvol.inputs.in_file = input
-    # extract brain for later linear alignment
-    if bet_padding:
-        bet_interface=fsl.BET(padding=True)
-    else:
-        bet_interface=fsl.BET(robust=True)
-    subj_bet = pe.Node(
-            name='sub%.3i_meanbet_%s' % (subj, hash),
-            interface=bet_interface)
-    subj_bet.inputs.frac=bet_frac
-    subj_bet.inputs.mask = True
-    wf.connect(make_meanvol, 'out_file', subj_bet, 'in_file')
+    if not input_subjtmpl:
+        # mean vol for each input
+        make_meanvol = pe.Node(
+                name='sub%.3i_meanvol_%s' % (subj, hash),
+                interface=fsl.ImageMaths(op_string='-Tmean'))
+        make_meanvol.inputs.in_file = input
+        # extract brain for later linear alignment
+        if bet_padding:
+            bet_interface=fsl.BET(padding=True)
+        else:
+            bet_interface=fsl.BET(robust=True)
+        subj_bet = pe.Node(
+                name='sub%.3i_meanbet_%s' % (subj, hash),
+                interface=bet_interface)
+        subj_bet.inputs.frac=bet_frac
+        subj_bet.inputs.mask = True
+        wf.connect(make_meanvol, 'out_file', subj_bet, 'in_file')
 
-    #
     align2template = pe.Node(
             name='sub%.3i_align2tmpl_%s' % (subj, hash),
             interface=fsl.FLIRT(
@@ -111,8 +132,12 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
         align2template.inputs.searchr_z = [(-1) * search_radius, search_radius]
     else:
         align2template.inputs.no_search = True
-    wf.connect(subj_bet, 'out_file', align2template, 'in_file')
     wf.connect(template, 'out_file', align2template, 'reference')
+    if input_subjtmpl:
+        # construct the existing brain image from the input
+        align2template.inputs.in_file = opj(inputdir, 'brain.nii.gz')
+    else:
+        wf.connect(subj_bet, 'out_file', align2template, 'in_file')
 
     fix_xfm = pe.Node(
             name='sub%.3i_fixxfm_%s' % (subj, hash),
@@ -131,9 +156,13 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             reference=brain_reference,
             apply_xfm=True))
     wf.connect(fix_xfm, 'out_file', mask2tmpl_lin, 'in_matrix_file')
-    wf.connect(subj_bet, 'mask_file', mask2tmpl_lin, 'in_file')
+    if input_subjtmpl:
+        # construct the existing brain mask image from the input
+        mask2tmpl_lin.inputs.in_file = opj(inputdir, 'brain_mask.nii.gz')
+    else:
+        wf.connect(subj_bet, 'mask_file', mask2tmpl_lin, 'in_file')
     if not non_linear:
-        wf.connect(mask2tmpl_lin, 'out_file', sink, '%s_brainmask.@out' % basename)
+        wf.connect(mask2tmpl_lin, 'out_file', sink, sinkslot_brainmask)
 
     # case of motion correcting input prior to alignment
     if motion_correction:
@@ -161,8 +190,8 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
         else:
             data2tmpl_lin.inputs.in_file = input
         wf.connect(fix_xfm, 'out_file', data2tmpl_lin, 'in_matrix_file')
-        wf.connect(fix_xfm, 'out_file', sink, '%s_xfm.@out' % basename)
-        wf.connect(data2tmpl_lin, 'out_file', sink, '%s.@out' % basename)
+        wf.connect(fix_xfm, 'out_file', sink, sinkslot_affine)
+        wf.connect(data2tmpl_lin, 'out_file', sink, sinkslot_data)
         return align2template, mask2tmpl_lin
 
     # and non-linear
@@ -173,8 +202,11 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
                 field_file=True,
                 ref_file=head_reference,
                 warp_resolution=tuple([warp_resolution] * 3)))
-    wf.connect(make_meanvol, 'out_file',
-               align2template_nl, 'in_file')
+    if input_subjtmpl:
+        align2template_nl.inputs.in_file = input
+    else:
+        wf.connect(make_meanvol, 'out_file',
+                   align2template_nl, 'in_file')
     wf.connect(fix_xfm, 'out_file',
                align2template_nl, 'affine_file')
     #wf.connect([(align2template_nl, subjsink, [
@@ -188,9 +220,13 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
         interface=fsl.ApplyWarp(
             ref_file=brain_reference,
             interp='nn'))
-    wf.connect(subj_bet, 'mask_file', warpmask2template, 'in_file')
     wf.connect(align2template_nl, 'field_file', warpmask2template, 'field_file')
-    wf.connect(warpmask2template, 'out_file', sink, '%s_brainmask.@out' % basename)
+    wf.connect(warpmask2template, 'out_file', sink, sinkslot_brainmask)
+    if input_subjtmpl:
+        # construct the existing brain mask image from the input
+        warpmask2template.inputs.in_file = opj(inputdir, 'brain_mask.nii.gz')
+    else:
+        wf.connect(subj_bet, 'mask_file', warpmask2template, 'in_file')
 
     # nonlin data warping to the template
     warp2template = pe.Node(
@@ -203,8 +239,8 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
     else:
         warp2template.inputs.in_file = input
     wf.connect(align2template_nl, 'field_file', warp2template, 'field_file')
-    wf.connect(align2template_nl, 'field_file', sink, '%s_warp.@out' % basename)
-    wf.connect(warp2template, 'out_file', sink, '%s.@out' % basename)
+    wf.connect(align2template_nl, 'field_file', sink, sinkslot_warpfield)
+    wf.connect(warp2template, 'out_file', sink, sinkslot_data)
 
     return align2template_nl, warpmask2template
 
@@ -251,6 +287,12 @@ def run(args):
                                               cli_input=args.use_qform,
                                               default=True))
 
+    input_subjtmpl=hlp.arg2bool(
+            hlp.get_cfg_option(cfg_section,
+                               'input is subject template',
+                               cli_input=args.input_subjtmpl,
+                               default=False))
+
     zpad = int(hlp.get_cfg_option(cfg_section, 'zslice padding',
                                   cli_input=args.zslice_padding, default=0))
 
@@ -296,7 +338,7 @@ def run(args):
                      non_linear=non_linear_flag, bet_frac=bet_frac,
                      bet_padding=bet_padding, search_radius=search_radius,
                      warp_resolution=warp_resolution, zpad=zpad,
-                     use_qform=use_qform)
+                     use_qform=use_qform, input_subjtmpl=input_subjtmpl)
             masks_.append(mask)
             aligned_.append(xfm)
             if non_linear_flag:
