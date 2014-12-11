@@ -78,6 +78,7 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
         sinkslot_brainmask = 'in_%s.brain_mask.@out' % (tmpl_label,)
         sinkslot_affine = 'in_%s.subj2tmpl_12dof.@out' % (tmpl_label,)
         sinkslot_warpfield = 'in_%s.subj2tmpl_warp.@out' % (tmpl_label,)
+        sinkslot_invwarpfield = 'in_%s.tmpl2subj_warp.@out' % (tmpl_label,)
         sink_regexp_substitutions=[
                     ('/[^/]*\.par', '.txt'),
                     ('/[^/]*\.nii', '.nii'),
@@ -87,6 +88,7 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
         sinkslot_affine = '%s_xfm.@out' % basename
         sinkslot_data = '%s.@out' % basename
         sinkslot_warpfield = '%s_warp.@out' % basename
+        sinkslot_invwarpfield = '%s_invwarp.@out' % basename
         sink_regexp_substitutions=[
                     ('/[^/]*\.par', '_%s.txt' % label),
                     ('/[^/]*\.nii', '_%s.nii' % label),
@@ -241,6 +243,17 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
     wf.connect(align2template_nl, 'field_file', warp2template, 'field_file')
     wf.connect(align2template_nl, 'field_file', sink, sinkslot_warpfield)
     wf.connect(warp2template, 'out_file', sink, sinkslot_data)
+
+    # get inverse warping
+    invwarp = pe.Node(
+        name='sub%.3i_invwar_%s' % (subj, hash),
+        interface=fsl.InvWarp())
+    if motion_correction:
+        wf.connect(mcflirt, 'out_file', invwarp, 'reference')
+    else:
+        invwarp.inputs.reference = input
+    wf.connect(align2template_nl, 'field_file', invwarp, 'warp')
+    wf.connect(invwarp, 'inverse_warp', sink, sinkslot_invwarpfield)
 
     return align2template_nl, warpmask2template
 
