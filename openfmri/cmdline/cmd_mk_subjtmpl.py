@@ -68,6 +68,10 @@ def setup_parser(parser):
         a foreground mask for each aligned volume. The average of these
         foreground masks across all input samples is available as QA output.
         This parameter has no influence on the actual alignment.""")
+    parser.add_argument('--estimate-best-init', type=hlp.arg2bool,
+        help="""If enabled, the sample input volume with the least squared
+        distance to all input volume will be chosen as the initial template.
+        Otherwise the first image is used.""")
 
 import sys
 import os                                    # system functions
@@ -76,19 +80,28 @@ import nipype.pipeline.engine as pe          # pypeline engine
 import nipype.interfaces.utility as util
 import nipype.interfaces.fsl as fsl
 import nipype.interfaces.afni as afni
-from nipype.interfaces.utility import Function
+from nipype.interfaces.utility import Function, Select
 from ..nipype_helpers import *
 
-def make_init_template(wf, subj, datasink, heads, target_resolution, zpad=0):
+def make_init_template(wf, subj, datasink, heads, target_resolution, zpad=0,
+        estimate_best_init=True):
     # pick one subject as the 1st-level reference
-    best_reference = pe.Node(
-            name='sub%.3i_init_pick_best_reference' % (subj,),
-            interface=Function(
-                function=pick_closest_to_avg,
-                input_names=['in_files', 'in_aux'],
-                output_names=['out_head', 'none']))
-    best_reference.inputs.in_aux = []
-    wf.connect(heads, 'out_file', best_reference, 'in_files')
+    if estimate_best_init:
+        best_reference = pe.Node(
+                name='sub%.3i_init_pick_best_reference' % (subj,),
+                interface=Function(
+                    function=pick_closest_to_avg,
+                    input_names=['in_files', 'in_aux'],
+                    output_names=['out_head', 'none']))
+        best_reference.inputs.in_aux = []
+        wf.connect(heads, 'out_file', best_reference, 'in_files')
+        head_slot = 'out_head'
+    else:
+        best_reference = pe.Node(
+                name='sub%.3i_init_pick_best_reference' % (subj,),
+                interface=Select(index=0))
+        wf.connect(heads, 'out_file', best_reference, 'inlist')
+        head_slot = 'out'
 
     init_zpad = pe.Node(
             name='sub%.3i_init_zpad' % (subj,),
@@ -98,7 +111,7 @@ def make_init_template(wf, subj, datasink, heads, target_resolution, zpad=0):
                 output_names=['padded_file']))
     init_zpad.inputs.nslices = zpad
     if zpad > 0:
-        wf.connect(best_reference, 'out_head', init_zpad, 'in_file')
+        wf.connect(best_reference, head_slot, init_zpad, 'in_file')
 
     if not target_resolution is None:
         upsample = pe.Node(
@@ -111,7 +124,7 @@ def make_init_template(wf, subj, datasink, heads, target_resolution, zpad=0):
         if zpad > 0:
             wf.connect(init_zpad, 'padded_file', upsample, 'in_file')
         else:
-            wf.connect(best_reference, 'out_head', upsample, 'in_file')
+            wf.connect(best_reference, head_slot, upsample, 'in_file')
         wf.connect(upsample, 'out_file', datasink, 'qa.init.head.@out')
         return upsample
     else:
@@ -120,7 +133,7 @@ def make_init_template(wf, subj, datasink, heads, target_resolution, zpad=0):
             wf.connect(init_zpad, 'padded_file', datasink, 'qa.init.head.@out')
             return init_zpad
         else:
-            wf.connect(best_reference, 'out_head', datasink, 'qa.init.head.@out')
+            wf.connect(best_reference, head_slot, datasink, 'qa.init.head.@out')
             return best_reference
 
 def make_subj_preproc_branch(wf, subj, datasrc, use_4d_mean=False):
@@ -147,6 +160,8 @@ def make_subj_preproc_branch(wf, subj, datasrc, use_4d_mean=False):
 def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink, fgthresh):
     if hasattr(tmpl.outputs, 'out_file'):
         oslot = 'out_file'
+    elif hasattr(tmpl.outputs, 'out'):
+        oslot = 'out'
     else:
         oslot = 'out_head'
 
@@ -223,11 +238,13 @@ def get_epi_tmpl_workflow(wf, datasrc, datasink,
                           init_template=None,
                           use_4d_mean=False,
                           fgthresh=5.0,
+                          estimate_best_init=True,
                           ):
     # extract sample volumes and normalize them
     vols = make_subj_preproc_branch(wf, subj, datasrc, use_4d_mean=use_4d_mean)
 
-    tmpl = make_init_template(wf, subj, datasink, vols, target_resolution, zpad=zpad)
+    tmpl = make_init_template(wf, subj, datasink, vols, target_resolution,
+            zpad=zpad, estimate_best_init=estimate_best_init)
 
     for lvl in range(lin + 1):
         tmpl = make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, datasink, fgthresh)
@@ -340,6 +357,12 @@ def run(args):
                     'foreground threshold',
                     cli_input=args.fgthresh,
                     default=1.0))
+    estimate_best_init=hlp.arg2bool(
+                hlp.get_cfg_option(
+                    cfg_section,
+                    'estimate best init template',
+                    cli_input=args.estimate_best_init,
+                    default=True))
 
     for subj in subjects:
         wf = get_epi_tmpl_workflow(wf, datasrcs[subj], datasinks[subj], subj,
@@ -355,6 +378,7 @@ def run(args):
                 init_template=init_template,
                 use_4d_mean=use_4d_mean,
                 fgthresh=fgthresh,
+                estimate_best_init=estimate_best_init,
                 )
 
     return wf
