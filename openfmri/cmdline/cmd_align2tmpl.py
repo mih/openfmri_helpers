@@ -155,8 +155,9 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             name='sub%.3i_mask2tmpl_lin_%s' % (subj, hash),
         interface=fsl.ApplyXfm(
             interp='nearestneighbour',
-            reference=brain_reference,
+            #reference=brain_reference,
             apply_xfm=True))
+    wf.connect(template, 'out_file', mask2tmpl_lin, 'reference')
     wf.connect(fix_xfm, 'out_file', mask2tmpl_lin, 'in_matrix_file')
     if input_subjtmpl:
         # construct the existing brain mask image from the input
@@ -185,8 +186,9 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
                 name='sub%.3i_data2tmpl_lin_%s' % (subj, hash),
             interface=fsl.ApplyXfm(
                 interp='trilinear',
-                reference=brain_reference,
+                #reference=brain_reference,
                 apply_xfm=True))
+        wf.connect(template, 'out_file', data2tmpl_lin, 'reference')
         if motion_correction:
             wf.connect(mcflirt, 'out_file', data2tmpl_lin, 'in_file')
         else:
@@ -202,8 +204,9 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             interface=fsl.FNIRT(
                 intensity_mapping_model='global_non_linear_with_bias',
                 field_file=True,
-                ref_file=head_reference,
+                #ref_file=brain_reference,
                 warp_resolution=tuple([warp_resolution] * 3)))
+    wf.connect(template, 'out_file', align2template_nl, 'ref_file')
     if input_subjtmpl:
         align2template_nl.inputs.in_file = input
     else:
@@ -220,8 +223,9 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
     warpmask2template = pe.Node(
         name='sub%.3i_warpmask2tmpl_nonlin_%s' % (subj, hash),
         interface=fsl.ApplyWarp(
-            ref_file=brain_reference,
+            #ref_file=brain_reference,
             interp='nn'))
+    wf.connect(template, 'out_file', warpmask2template, 'ref_file')
     wf.connect(align2template_nl, 'field_file', warpmask2template, 'field_file')
     wf.connect(warpmask2template, 'out_file', sink, sinkslot_brainmask)
     if input_subjtmpl:
@@ -234,8 +238,9 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
     warp2template = pe.Node(
         name='sub%.3i_warp2tmpl_nonlin_%s' % (subj, hash),
         interface=fsl.ApplyWarp(
-            ref_file=brain_reference,
+            #ref_file=brain_reference,
             interp='trilinear'))
+    wf.connect(template, 'out_file', warp2template, 'ref_file')
     if motion_correction:
         wf.connect(mcflirt, 'out_file', warp2template, 'in_file')
     else:
