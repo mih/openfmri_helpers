@@ -38,23 +38,12 @@ def pick_closest_to_avg(in_files, in_aux):
 
 def zslice_pad(in_file, nslices):
     import os
-    import numpy as np
-    import nibabel as nb
-    in_img = nb.load(in_file)
-    in_hdr = in_img.get_header()
-    in_data = in_img.get_data()
-    dshape = list(in_data.shape)
-    xfm = in_img.get_affine()
-    if nslices > 0:
-        dshape[2] = in_data.shape[2] + 2 * nslices
-        out_data = np.zeros(dshape, dtype=in_data.dtype)
-        out_data[:,:,nslices:-nslices] = in_data
-        # fix image transform
-        xfm[2,3] -= in_hdr.get_zooms()[2] * nslices
-    else:
-        out_data = in_data
-    nb.Nifti1Image(out_data, xfm).to_filename('zslice_padded.nii.gz')
-    return os.path.abspath('zslice_padded.nii.gz')
+    if not nslices:
+        return os.path.abspath(in_file)
+    from subprocess import check_call
+    check_call(['3dZeropad', '-IS', str(nslices),
+                '-prefix', 'padded.nii.gz', in_file])
+    return os.path.abspath('padded.nii.gz')
 
 def nonzero_avg(in_file):
     import numpy as np
