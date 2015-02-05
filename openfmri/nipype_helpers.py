@@ -65,9 +65,12 @@ def nonzero_avg(in_file):
             'avg.nii.gz')
     nb.save(nb.Nifti1Image(avg_count, in_img.get_affine()),
             'avg_overlap.nii.gz')
+    nb.save(nb.Nifti1Image((avg_count > 0).astype('uint8'), in_img.get_affine()),
+            'avg_mask.nii.gz')
     return [os.path.abspath(i) for i in (
         'avg.nii.gz',
         'avg_overlap.nii.gz',
+        'avg_mask.nii.gz',
         )]
 
 def make_epi_template(bold_brains):

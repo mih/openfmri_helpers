@@ -180,7 +180,7 @@ def make_subj_preproc_branch(label, wf, subj, datadir, datasrc,
             interface=Function(
                 function=nonzero_avg,
                 input_names=['in_file'],
-                output_names=['out_file', 'avg_stats']))
+                output_names=['out_file', 'avg_stats', 'avg_mask']))
     wf.connect(align_samplevols, 'out_file', make_subj_tmpl, 'in_file')
     wf.connect(make_subj_tmpl, 'out_file',
                subj_sink, 'qa.%s.head.@out' % label)
@@ -245,12 +245,19 @@ def align_subj_to_tmpl_nlin(wf, subj, lvl, brain_tmpl, head_tmpl, head,
                 intensity_mapping_model=intmod,
                 #intensity_mapping_model='global_non_linear_with_bias',
                 #intensity_mapping_model='local_non_linear',
-                warp_resolution=(10, 10, 10)))
+                #warp_resolution=(10, 10, 10)))
+                warp_resolution=(20, 20, 20)))
                 #warp_resolution=(7, 7, 7)))
     wf.connect(head, 'out_file',
                align_head_to_tmpl, 'in_file')
     wf.connect(head_tmpl, 'out_file',
                align_head_to_tmpl, 'ref_file')
+    if hasattr(brain_tmpl.outputs, 'avg_mask'):
+        wf.connect(brain_tmpl, 'avg_mask',
+                   align_head_to_tmpl, 'refmask_file')
+    else:
+        wf.connect(brain_tmpl, 'mask_file',
+                   align_head_to_tmpl, 'refmask_file')
     wf.connect(last_linear_align, 'out_matrix_file',
                align_head_to_tmpl, 'affine_file')
 
@@ -270,7 +277,7 @@ def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
             interface=Function(
                 function=nonzero_avg,
                 input_names=['in_file'],
-                output_names=['out_file', 'avg_stats']))
+                output_names=['out_file', 'avg_stats', 'avg_mask']))
     wf.connect(in_heads, 'out', merge_heads, 'in_files')
     wf.connect(merge_heads, 'merged_file', make_head_tmpl, 'in_file')
     wf.connect(make_head_tmpl, 'out_file',
@@ -289,7 +296,7 @@ def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
                 interface=Function(
                     function=nonzero_avg,
                     input_names=['in_file'],
-                    output_names=['out_file', 'avg_stats']))
+                    output_names=['out_file', 'avg_stats', 'avg_mask']))
         wf.connect(in_brains, 'out', merge_brains, 'in_files')
         wf.connect(merge_brains, 'merged_file', make_brain_tmpl, 'in_file')
         wf.connect(make_brain_tmpl, 'out_file',
@@ -300,9 +307,9 @@ def make_avg_template(wf, datasink, lvl, in_brains, in_heads,
     else:
         # skull-strip the head template
         if bet_padding:
-            bet_interface=fsl.BET(padding=True, frac=bet_frac)
+            bet_interface=fsl.BET(padding=True, frac=bet_frac, mask=True)
         else:
-            bet_interface=fsl.BET(robust=True, frac=bet_frac)
+            bet_interface=fsl.BET(robust=True, frac=bet_frac, mask=True)
         tmpl_bet = pe.Node(
             name='lvl%i_tmpl_bet' % lvl,
             interface=bet_interface)

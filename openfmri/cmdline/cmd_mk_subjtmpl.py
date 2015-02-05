@@ -193,7 +193,7 @@ def make_subj_lvl_branch(label, wf, subj, lvl, tmpl, vols, sink, fgthresh):
             interface=Function(
                 function=nonzero_avg,
                 input_names=['in_file'],
-                output_names=['out_file', 'avg_stats']))
+                output_names=['out_file', 'avg_stats', 'avg_mask']))
     wf.connect(zeroagain, 'out_file', make_subj_tmpl, 'in_file')
     wf.connect(make_subj_tmpl, 'out_file',
                sink, 'qa.lvl%i.head.@out' % (lvl,))
