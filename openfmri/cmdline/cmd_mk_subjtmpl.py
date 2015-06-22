@@ -58,6 +58,9 @@ def setup_parser(parser):
         If not specified, one of the input images is used as a reference
         (the one with the smallest absolute difference from the mean of all
         input images).""")
+    parser.add_argument('--skullstrip-input', type=hlp.arg2bool,
+        help="""If enabled, input images are skullstripped before any further
+        processing.""")
     parser.add_argument('--use-4d-mean', type=hlp.arg2bool,
         help="""If enabled, 4D input images are "compressed" into their
         mean volume, which is then used for alignment. Otherwise the first
@@ -136,24 +139,33 @@ def make_init_template(wf, subj, datasink, heads, target_resolution, zpad=0,
             wf.connect(best_reference, head_slot, datasink, 'qa.init.head.@out')
             return best_reference
 
-def make_subj_preproc_branch(wf, subj, datasrc, use_4d_mean=False):
+def make_subj_preproc_branch(wf, subj, datasrc, skullstrip=False, use_4d_mean=False):
     # normalize all input images
     normalize_vols = pe.MapNode(
             name='sub%.3i_normalize_samplevols' % (subj,),
             interface=fsl.ImageMaths(op_string='-inm 1000'),
             iterfield=['in_file'])
+    if skullstrip:
+        skullstrip_vols = pe.MapNode(
+            name='sub%.3i_skullstrip_samplevols' % (subj,),
+            interface=fsl.BET(functional=True),
+            iterfield=['in_file'])
+        wf.connect(skullstrip_vols, 'out_file', normalize_vols, 'in_file')
+        connect_node = skullstrip_vols
+    else:
+        connect_node = normalize_vols
     if use_4d_mean:
         make_samplevols = pe.MapNode(
                 name='sub%.3i_make_samplevol' % (subj,),
                 interface=fsl.ImageMaths(op_string='-Tmean'),
                 iterfield=['in_file'])
-        wf.connect(make_samplevols, 'out_file', normalize_vols, 'in_file')
+        wf.connect(make_samplevols, 'out_file', connect_node, 'in_file')
     else:
         make_samplevols = pe.MapNode(
                 name='sub%.3i_make_samplevol' % (subj,),
                 interface=fsl.ExtractROI(t_min=0, t_size=1),
                 iterfield=['in_file'])
-        wf.connect(make_samplevols, 'roi_file', normalize_vols, 'in_file')
+        wf.connect(make_samplevols, 'roi_file', connect_node, 'in_file')
     wf.connect(datasrc, 'out_paths', make_samplevols, 'in_file')
     return normalize_vols
 
@@ -236,12 +248,13 @@ def get_epi_tmpl_workflow(wf, datasrc, datasink,
                           tmpl_bet_frac=0.5,
                           tmpl_bet_gradient=0,
                           init_template=None,
+                          skullstrip_input=False,
                           use_4d_mean=False,
                           fgthresh=5.0,
                           estimate_best_init=True,
                           ):
     # extract sample volumes and normalize them
-    vols = make_subj_preproc_branch(wf, subj, datasrc, use_4d_mean=use_4d_mean)
+    vols = make_subj_preproc_branch(wf, subj, datasrc, skullstrip=skullstrip_input, use_4d_mean=use_4d_mean)
 
     tmpl = make_init_template(wf, subj, datasink, vols, target_resolution,
             zpad=zpad, estimate_best_init=estimate_best_init)
@@ -345,6 +358,12 @@ def run(args):
                     'initial reference brain',
                     cli_input=args.initial_reference_brain,
                     default=None)
+    skullstrip_input=hlp.arg2bool(
+                hlp.get_cfg_option(
+                    cfg_section,
+                    'skullstrip input',
+                    cli_input=args.skullstrip_input,
+                    default=False))
     use_4d_mean=hlp.arg2bool(
                 hlp.get_cfg_option(
                     cfg_section,
@@ -376,6 +395,7 @@ def run(args):
                 tmpl_bet_frac=tmpl_bet_frac,
                 tmpl_bet_gradient=tmpl_bet_gradient,
                 init_template=init_template,
+                skullstrip_input=skullstrip_input,
                 use_4d_mean=use_4d_mean,
                 fgthresh=fgthresh,
                 estimate_best_init=estimate_best_init,
