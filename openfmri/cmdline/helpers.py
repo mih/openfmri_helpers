@@ -223,10 +223,10 @@ def get_dataset_subj_ids(args):
             subjs.append(int_subj)
     else:
         basedir = get_dataset_dir(args)
-        subjs = [int(s[3:]) for s in os.listdir(basedir)
+        subjs = [int(s[4:]) for s in os.listdir(basedir)
                     if s.startswith('sub')
                         and len(s) > 3
-                            and s[3].isdigit()]
+                            and s[4].isdigit()]
     return sorted(subjs)
 
 def get_dataset_dir(args):
@@ -236,11 +236,22 @@ def get_dataset_dir(args):
     dataset = get_cfg_option('common', 'dataset', cli_input=args.dataset)
     return opj(datadir, dataset)
 
-def exclude_subjects(subjects, section):
-    exclude = [int(s)
-                for s in get_cfg_option(section,
-                                        'exclude subjects',
-                                        default='').split()]
+def exclude_subjects(subjects, section, fromcmdline=None):
+    if fromcmdline is None:
+        excluded = get_cfg_option(
+            section,
+            'exclude subjects',
+            default='').split()
+    else:
+        excluded = fromcmdline
+    exclude = [int(s) for s in excluded]
 
     lgr.info("exclude subjects '%s' based on configuration'" % exclude)
     return [s for s in subjects if not s in exclude]
+
+def subjid2prefix(subjid, ds_path):
+    from glob import glob
+    padding = [len(os.path.basename(d)[4:]) for d in glob(opj(ds_path, 'sub-*')) if os.path.isdir(d)]
+    if len(set(padding)) != 1:
+        raise ValueError("Inconsistent zero-padding of subjects directories")
+    return ('%%.%ii' % (padding[0],)) % subjid

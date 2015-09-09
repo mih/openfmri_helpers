@@ -72,6 +72,12 @@ subjects = (
          help="""List of IDs of subjects to process.""")
 )
 
+exclude_subjects = (
+    'exclude-subjects', ('--exclude-subjects',),
+    dict(nargs='*',
+         help="""List of IDs of subjects to exclude from processing.""")
+)
+
 zslice_padding = (
     'zslice-padding', ('--zslice-padding',),
     dict(type=int,

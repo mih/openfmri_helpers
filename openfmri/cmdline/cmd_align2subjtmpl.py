@@ -30,13 +30,15 @@ parser_args = dict(formatter_class=argparse.RawDescriptionHelpFormatter)
 
 def setup_parser(parser):
     hlp.parser_add_common_args(parser,
-        opt=('datadir', 'dataset', 'subjects', 'workdir'))
+        opt=('datadir', 'dataset', 'subjects', 'exclude_subjects', 'workdir'))
     hlp.parser_add_common_args(parser, required=True,
         opt=('label',))
     parser.add_argument('--template',
         help="""Reference template label""")
     parser.add_argument('--input-expression',
         help="""For the data input""")
+    parser.add_argument('--costfx',
+        help="""Cost function label for MCFLIRT""")
     parser.add_argument('--fgthresh', type=float,
         help="""Threshold for foreground voxels in percent of the
         robust range. This threshold is used to determine a foreground
@@ -65,7 +67,7 @@ def run(args):
     dataset = hlp.get_cfg_option('common', 'dataset', cli_input=args.dataset)
 
     subjects = hlp.get_dataset_subj_ids(args)
-    subjects = hlp.exclude_subjects(subjects, cfg_section)
+    subjects = hlp.exclude_subjects(subjects, cfg_section, args.exclude_subjects)
 
     dsdir = hlp.get_dataset_dir(args)
 
@@ -74,6 +76,9 @@ def run(args):
 
     input_exp = hlp.get_cfg_option(cfg_section, 'input expression',
                                    cli_input=args.input_expression)
+    costfx = hlp.get_cfg_option(cfg_section, 'costfx',
+                             cli_input=args.costfx,
+                             default='corratio')
     template = hlp.get_cfg_option(cfg_section, 'template',
                                   cli_input=args.template)
     via = hlp.get_cfg_option(cfg_section, 'via template',
@@ -85,8 +90,11 @@ def run(args):
         subj_sink = pe.Node(
                 interface=nio.DataSink(
                     parameterization=False,
-                    base_directory=os.path.abspath(opj(dsdir, 'sub%.3i' % subj,
-                                                   'templates')),
+                    base_directory=os.path.abspath(
+                        opj(
+                            dsdir,
+                            'sub-%s' % hlp.subjid2prefix(subj, dsdir),
+                            'templates')),
                     container=template,
                     regexp_substitutions=[
                         ('/[^/]*\.nii', '_%s.nii' % label),
@@ -94,14 +102,14 @@ def run(args):
                 name="sub%.3i_sink" % subj,
                 overwrite=True)
 
-        reference = opj(dsdir, 'sub%.3i' % subj,
-                        'templates', template, 'head.nii.gz')
-        tmpl_brain_mask = opj(dsdir, 'sub%.3i' % subj,
-                        'templates', template, 'brain_mask.nii.gz')
+        subprefix = 'sub-%s' % hlp.subjid2prefix(subj, dsdir)
+        reference = opj(dsdir, subprefix, 'templates', template, 'head.nii.gz')
+        tmpl_brain_mask = opj(dsdir, subprefix, 'templates',
+            template, 'brain_mask.nii.gz')
         if not os.path.exists(tmpl_brain_mask):
             tmpl_brain_mask = None
 
-        expr = input_exp % dict(subj='sub%.3i' % subj)
+        expr = input_exp % dict(subj=subprefix)
 
         df = nio.DataFinder(root_paths=dsdir, match_regex=expr,
                             ignore_exception=True)
@@ -121,7 +129,9 @@ def run(args):
             sink = pe.Node(
                     interface=nio.DataSink(
                         parameterization=False,
-                        base_directory=os.path.abspath(os.path.dirname(input)),
+                        base_directory=os.path.abspath(
+                            opj(dsdir, subprefix, 'templates')),
+                        container=template,
                         regexp_substitutions=[
                             ('/[^/]*\.par', '_%s.txt' % label),
                             ('/[^/]*\.nii', '_%s.nii' % label),
@@ -134,12 +144,11 @@ def run(args):
             align4d = pe.Node(
                     name='sub%.3i_%i_align4d_%s' % (subj, i, hash),
                     interface=fsl.MCFLIRT(
-                        cost='corratio',
-                        #cost='normmi',
+                        cost=costfx,
                         save_plots=True,
                         stages=4))
             align4d.inputs.in_file = input
-            wf.connect(align4d, 'out_file', sink, '%s.@out' % basename)
+            wf.connect(align4d, 'out_file', sink, 'aligned.%s.@out' % basename)
             wf.connect(align4d, 'par_file', sink, 'qa.%s_moest.@out' % basename)
             # look up an initial xfm to constrain the search
             if not via is None:

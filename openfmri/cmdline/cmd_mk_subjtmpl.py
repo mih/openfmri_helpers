@@ -310,7 +310,7 @@ def run(args):
                       hlp.get_data_finder(
                         'sub%.3i_datasrc' % subj,
                         dsdir,
-                        input_exp % dict(subj='sub%.3i' % subj)))
+                        input_exp % dict(subj='sub-%s' % hlp.subjid2prefix(subj, dsdir))))
                             for subj in subjects])
     datasinks = dict([
         (subj,
@@ -318,9 +318,11 @@ def run(args):
             interface=nio.DataSink(
             parameterization=False,
             #TODO move to subj dir
-            base_directory=os.path.abspath(opj(dsdir,
-                                               'sub%.3i' % subj,
-                                               'templates')),
+            base_directory=os.path.abspath(
+                opj(
+                    dsdir,
+                    'sub-%s' % hlp.subjid2prefix(subj, dsdir),
+                    'templates')),
             container=label,
             regexp_substitutions=[
                 ('/[^/]*\.nii', '.nii'),
