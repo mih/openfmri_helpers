@@ -63,7 +63,7 @@ def setup_parser(parser):
 def proc(label, tmpl_label, template, wf, subj, input, dsdir,
          motion_correction,
          non_linear=False, bet_frac=0.5, bet_padding=False, search_radius=0,
-         warp_resolution=5, zpad=0, use_qform=True, input_subjtmpl=False):
+         warp_resolution=5, zpadxfm=None, use_qform=True, input_subjtmpl=False):
     import hashlib
 
     inputdir = os.path.dirname(input)
@@ -125,6 +125,10 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             name='sub%.3i_align2tmpl_%s' % (subj, hash),
             interface=fsl.FLIRT(
                 cost='corratio',
+                #cost='mutualinfo',
+                #cost='normmi',
+                #cost='normcorr',
+                #cost='leastsq',
                 uses_qform=use_qform,
                 dof=12,
                 args="-interp trilinear"))
@@ -141,15 +145,21 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
     else:
         wf.connect(subj_bet, 'out_file', align2template, 'in_file')
 
-    fix_xfm = pe.Node(
-            name='sub%.3i_fixxfm_%s' % (subj, hash),
-            interface=Function(
-                function=fix_xfm_after_zpad,
-                input_names=['xfm', 'reference', 'nslices'],
-                output_names=['out_file']))
-    fix_xfm.inputs.nslices = zpad
-    wf.connect(template, 'out_file', fix_xfm, 'reference')
-    wf.connect(align2template, 'out_matrix_file', fix_xfm, 'xfm')
+    concat_zpadxfm = pe.Node(
+            name='sub%.3i_concatzpadzfm_%s' % (subj, hash),
+            interface=fsl.ConvertXFM(
+                concat_xfm = True))
+    wf.connect(align2template, 'out_matrix_file', concat_zpadxfm, 'in_file')
+    wf.connect(zpadxfm, 'out_matrix_file', concat_zpadxfm, 'in_file2')
+    #fix_xfm = pe.Node(
+    #        name='sub%.3i_fixxfm_%s' % (subj, hash),
+    #        interface=Function(
+    #            function=fix_xfm_after_zpad,
+    #            input_names=['xfm', 'reference', 'nslices'],
+    #            output_names=['out_file']))
+    #fix_xfm.inputs.nslices = zpad
+    #wf.connect(template, 'out_file', fix_xfm, 'reference')
+    #wf.connect(align2template, 'out_matrix_file', fix_xfm, 'xfm')
 
     mask2tmpl_lin = pe.Node(
             name='sub%.3i_mask2tmpl_lin_%s' % (subj, hash),
@@ -157,8 +167,10 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             interp='nearestneighbour',
             #reference=brain_reference,
             apply_xfm=True))
-    wf.connect(template, 'out_file', mask2tmpl_lin, 'reference')
-    wf.connect(fix_xfm, 'out_file', mask2tmpl_lin, 'in_matrix_file')
+    #wf.connect(template, 'out_file', mask2tmpl_lin, 'reference')
+    mask2tmpl_lin.inputs.reference = head_reference
+    #wf.connect(fix_xfm, 'out_file', mask2tmpl_lin, 'in_matrix_file')
+    wf.connect(concat_zpadxfm, 'out_file', mask2tmpl_lin, 'in_matrix_file')
     if input_subjtmpl:
         # construct the existing brain mask image from the input
         mask2tmpl_lin.inputs.in_file = opj(inputdir, 'brain_mask.nii.gz')
@@ -188,13 +200,16 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
                 interp='trilinear',
                 #reference=brain_reference,
                 apply_xfm=True))
-        wf.connect(template, 'out_file', data2tmpl_lin, 'reference')
+        #wf.connect(template, 'out_file', data2tmpl_lin, 'reference')
+        data2tmpl_lin.inputs.reference = head_reference
         if motion_correction:
             wf.connect(mcflirt, 'out_file', data2tmpl_lin, 'in_file')
         else:
             data2tmpl_lin.inputs.in_file = input
-        wf.connect(fix_xfm, 'out_file', data2tmpl_lin, 'in_matrix_file')
-        wf.connect(fix_xfm, 'out_file', sink, sinkslot_affine)
+        #wf.connect(fix_xfm, 'out_file', data2tmpl_lin, 'in_matrix_file')
+        wf.connect(concat_zpadxfm, 'out_file', data2tmpl_lin, 'in_matrix_file')
+        #wf.connect(fix_xfm, 'out_file', sink, sinkslot_affine)
+        wf.connect(concat_zpadxfm, 'out_file',  sink, sinkslot_affine)
         wf.connect(data2tmpl_lin, 'out_file', sink, sinkslot_data)
         return align2template, mask2tmpl_lin
 
@@ -204,15 +219,19 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
             interface=fsl.FNIRT(
                 intensity_mapping_model='global_non_linear_with_bias',
                 field_file=True,
+                #fieldcoeff_file=False,
                 #ref_file=brain_reference,
                 warp_resolution=tuple([warp_resolution] * 3)))
-    wf.connect(template, 'out_file', align2template_nl, 'ref_file')
+    #wf.connect(template, 'out_file', align2template_nl, 'ref_file')
+    align2template_nl.inputs.ref_file = head_reference
     if input_subjtmpl:
         align2template_nl.inputs.in_file = input
     else:
         wf.connect(make_meanvol, 'out_file',
                    align2template_nl, 'in_file')
-    wf.connect(fix_xfm, 'out_file',
+    #wf.connect(fix_xfm, 'out_file',
+    #           align2template_nl, 'affine_file')
+    wf.connect(concat_zpadxfm, 'out_file',
                align2template_nl, 'affine_file')
     #wf.connect([(align2template_nl, subjsink, [
     #    ('field_file', 'qa.task%.3i.subj2tasktmpl_warp.@out' % task),
@@ -225,7 +244,8 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
         interface=fsl.ApplyWarp(
             #ref_file=brain_reference,
             interp='nn'))
-    wf.connect(template, 'out_file', warpmask2template, 'ref_file')
+    #wf.connect(template, 'out_file', warpmask2template, 'ref_file')
+    warpmask2template.inputs.ref_file = head_reference
     wf.connect(align2template_nl, 'field_file', warpmask2template, 'field_file')
     wf.connect(warpmask2template, 'out_file', sink, sinkslot_brainmask)
     if input_subjtmpl:
@@ -240,7 +260,8 @@ def proc(label, tmpl_label, template, wf, subj, input, dsdir,
         interface=fsl.ApplyWarp(
             #ref_file=brain_reference,
             interp='trilinear'))
-    wf.connect(template, 'out_file', warp2template, 'ref_file')
+    #wf.connect(template, 'out_file', warp2template, 'ref_file')
+    warp2template.inputs.ref_file = head_reference
     if motion_correction:
         wf.connect(mcflirt, 'out_file', warp2template, 'in_file')
     else:
@@ -324,6 +345,15 @@ def run(args):
     zpad_brain.inputs.nslices = zpad
     zpad_brain.inputs.in_file = brain_reference
 
+    align_zpad2orig = pe.Node(
+            name='align_zpad2orig',
+            interface=fsl.FLIRT(
+                cost='corratio',
+                uses_qform=use_qform,
+                dof=6))
+    align_zpad2orig.inputs.reference = brain_reference
+    wf.connect(zpad_brain, 'out_file', align_zpad2orig, 'in_file')
+
     masks_ = []
     aligned_ = []
     for subj in subjects:
@@ -345,7 +375,7 @@ def run(args):
                      motion_correction,
                      non_linear=non_linear_flag, bet_frac=bet_frac,
                      bet_padding=bet_padding, search_radius=search_radius,
-                     warp_resolution=warp_resolution, zpad=zpad,
+                     warp_resolution=warp_resolution, zpadxfm=align_zpad2orig,
                      use_qform=use_qform, input_subjtmpl=input_subjtmpl)
             masks_.append(mask)
             aligned_.append(xfm)

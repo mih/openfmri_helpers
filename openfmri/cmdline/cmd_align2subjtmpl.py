@@ -135,15 +135,16 @@ def run(args):
                     name='sub%.3i_%i_align4d_%s' % (subj, i, hash),
                     interface=fsl.MCFLIRT(
                         cost='corratio',
+                        #cost='normmi',
                         save_plots=True,
                         stages=4))
             align4d.inputs.in_file = input
             wf.connect(align4d, 'out_file', sink, '%s.@out' % basename)
             wf.connect(align4d, 'par_file', sink, 'qa.%s_moest.@out' % basename)
-            # look up an initial xfm to contrain the search
+            # look up an initial xfm to constrain the search
             if not via is None:
                 reference = opj(dsdir, 'sub%.3i' % subj, 'templates',
-                                 via, 'in_%s' % template, 'head.nii.gz')
+                                 via, 'in_%s' % template, 'brain.nii.gz')
                 if not os.path.exists(reference):
                     raise ValueError('"via template" does not exist')
             align4d.inputs.ref_file = reference

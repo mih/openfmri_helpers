@@ -62,7 +62,8 @@ def align_template(wf, label, subj, intmpl, reftmpl, tmpldir):
     align = pe.Node(
             name='sub%.3i_align' % (subj,),
             interface=fsl.FLIRT(
-                cost='corratio',
+                #cost='corratio',
+                cost='mutualinfo',
                 reference=ref_img,
                 dof=6,
                 interp='sinc'))

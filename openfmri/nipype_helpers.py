@@ -25,7 +25,7 @@ def pick_closest_to_avg(in_files, in_aux):
     fsl.Merge(dimension='t',
               in_files=in_files,
               merged_file='merged_input.nii.gz').run()
-    avg, avg_stats = nonzero_avg('merged_input.nii.gz')
+    avg, avg_stats, avg_mask = nonzero_avg('merged_input.nii.gz')
     avg_data = nb.load(avg).get_data()
     dists = [np.sum((avg_data - nb.load(vol).get_data())**2) for vol in in_files]
     min_idx = np.argmin(dists)
