@@ -47,6 +47,8 @@ def setup_parser(parser):
         Default: no trim""")
     parser.add_argument('--input-expression',
         help="""For the data input""")
+    parser.add_argument('--output-basedir',
+        help="""template for per-subject output directory""")
     parser.add_argument('--bet-padding', type=hlp.arg2bool,
         help="""Enable padding for BET""")
     parser.add_argument('--tmpl-bet-frac', type=float,
@@ -312,17 +314,18 @@ def run(args):
                         dsdir,
                         input_exp % dict(subj='sub-%s' % hlp.subjid2prefix(subj, dsdir))))
                             for subj in subjects])
+    out_basedir = hlp.get_cfg_option(
+        cfg_section, 'output base directory', cli_input=args.output_basedir,
+        default='%(subj)s/templates')
     datasinks = dict([
         (subj,
          pe.Node(
             interface=nio.DataSink(
             parameterization=False,
             #TODO move to subj dir
-            base_directory=os.path.abspath(
-                opj(
-                    dsdir,
-                    'sub-%s' % hlp.subjid2prefix(subj, dsdir),
-                    'templates')),
+            base_directory=os.path.abspath(opj(
+                dsdir,
+                out_basedir % dict(subj='sub-%s' % hlp.subjid2prefix(subj, dsdir)))),
             container=label,
             regexp_substitutions=[
                 ('/[^/]*\.nii', '.nii'),
