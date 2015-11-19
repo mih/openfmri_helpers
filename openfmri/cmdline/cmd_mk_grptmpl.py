@@ -140,7 +140,7 @@ def make_subj_preproc_branch(label, wf, subj, datadir, datasrc,
             interface=nio.DataSink(
                 parameterization=False,
                 base_directory=os.path.abspath(datadir),
-                container='sub%.3i' % subj,
+                container='sub-%s' % hlp.subjid2prefix(subj, datadir),
                 regexp_substitutions=[
                     ('/[^/]*\.nii', '.nii'),
                 ]),
@@ -615,7 +615,7 @@ def run(args):
                       hlp.get_data_finder(
                         'sub%.3i_datasrc' % subj,
                         dsdir,
-                        input_exp % dict(subj='sub%.3i' % subj)))
+                        input_exp % dict(subj='sub-%s' % hlp.subjid2prefix(subj, dsdir))))
                             for subj in subjects])
 
     wf = get_epi_tmpl_workflow(wf, datasrcs, subjects, label,

@@ -357,7 +357,7 @@ def run(args):
     masks_ = []
     aligned_ = []
     for subj in subjects:
-        expr = input_exp % dict(subj='sub%.3i' % subj)
+        expr = input_exp % dict(subj='sub-%s' % hlp.subjid2prefix(subj, dsdir))
 
         df = nio.DataFinder(root_paths=dsdir, match_regex=expr,
                             ignore_exception=True)
